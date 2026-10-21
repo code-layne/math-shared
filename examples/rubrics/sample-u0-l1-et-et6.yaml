@@ -1,0 +1,19 @@
+id: et6
+points: 4
+task: Interpret the slope of the linear relationship in context.
+criteria:
+  - id: predicted
+    points: 1
+    full: Says the change is in the predicted or average pay, not the actual pay.
+  - id: value
+    points: 1
+    full: Gives the slope value, 2.5.
+  - id: units
+    points: 1
+    full: Gives units for both variables, dollars per additional hour.
+  - id: context
+    points: 1
+    full: Names both variables in context.
+examples:
+  - response: "For each extra hour, pay goes up 2.5."
+    scores: {predicted: 0, value: 1, units: 0, context: 1}

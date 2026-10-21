@@ -1,0 +1,538 @@
+% grading.sty — graded answer boxes, registration marks, page QR codes and the
+% student name strip, for the packet-based courses. See README.md and
+% grading-system-design.md.
+%
+% A graded item is authored identically in the blank component and its key:
+%
+%   \gradedblank[id=et2, type=short, points=2, answer={3/2}]{1.5in}{0.5in}
+%
+% The blank draws an empty bordered box; the key (\gradingkeytrue, normally set
+% by the course key package) prints the answer inside the same box. The box is
+% a fixed-size hbox in both, so the key can never move a line or a page break.
+%
+% Every graded item writes one JSON line to \jobname.grading with its page and
+% box (PDF points, lower-left origin); scripts/manifest.py turns that file into
+% manifest.json.
+%
+% Every page gets, from the shipout/background hook:
+%   - four corner registration marks, in the side margins;
+%   - a QR code encoding "assignment|page|trackingid" in the right margin, just
+%     under the top-right mark;
+%   - the name strip, a fixed rectangle in the top margin holding
+%     \GradingStudentName. Ingest blanks exactly this rectangle on every scan.
+% Nothing is drawn in the bottom margin: shared/paginate.tex whites out a band
+% there (10pt–42pt above the page edge) to renumber packet pages.
+%
+% Geometry assumes the article preamble of the courses (letter paper, side
+% margins 0.75in, top 0.6in). Every position below is a length you can reset
+% in a course preamble; the defaults keep 4bp or more between each element and
+% the text block.
+
+\NeedsTeXFormat{LaTeX2e}[2022/06/01]
+\ProvidesExplPackage{grading}{2026/10/21}{0.1}
+  {Graded answer boxes, registration marks, QR codes and name strip}
+
+\RequirePackage{xcolor}
+\RequirePackage{zref-savepos}
+\RequirePackage{zref-abspage}
+\RequirePackage{qrcode}
+
+% Every box label records the absolute page it landed on.
+\zref@addprop{savepos}{abspage}
+
+% ── Key mode ──────────────────────────────────────────────────────────────────
+% \ifgradingkey is tested when each box is drawn, so the course key package
+% may set \gradingkeytrue anywhere in the preamble after loading this package.
+% It is also safe for a key package to define the switch itself first.
+\cs_if_exist:NF \ifgradingkey { \newif \ifgradingkey }
+\DeclareOption { key } { \gradingkeytrue }
+\ProcessOptions \scan_stop:
+
+% ── Document identity ─────────────────────────────────────────────────────────
+\tl_new:N \g__grading_assignment_tl
+\tl_new:N \g__grading_course_tl
+\NewDocumentCommand \gradingassignment { m }
+  { \tl_gset:Nx \g__grading_assignment_tl { \tl_to_str:n {#1} } }
+\NewDocumentCommand \gradingcourse { m }
+  { \tl_gset:Nx \g__grading_course_tl { \tl_to_str:n {#1} } }
+
+% Tracking id for the QR code: \GradingStudentID if defined, else MASTER.
+\cs_new:Npn \__grading_student: { \cs_if_exist_use:NF \GradingStudentID { MASTER } }
+
+% ── Geometry (all from the page edges) ────────────────────────────────────────
+% Registration marks: filled squares, \gradingmarkinset from the left/right
+% edge. Top marks hang \gradingmarktop below the top edge; bottom marks stand
+% \gradingmarkbottom above the bottom edge, clear of the paginate.tex band.
+\newlength \gradingmarksize    \setlength \gradingmarksize   {12bp}
+\newlength \gradingmarkinset   \setlength \gradingmarkinset  {21bp}
+\newlength \gradingmarktop     \setlength \gradingmarktop    {16bp}
+\newlength \gradingmarkbottom  \setlength \gradingmarkbottom {60bp}
+% QR code: \gradingqrsize square, \gradingqrinset from the right edge,
+% \gradingqrtop below the top edge.
+\newlength \gradingqrsize      \setlength \gradingqrsize     {32bp}
+\newlength \gradingqrinset     \setlength \gradingqrinset    {14bp}
+\newlength \gradingqrtop       \setlength \gradingqrtop      {40bp}
+% Name strip: the rectangle ingest blanks.
+\newlength \gradingstripleft   \setlength \gradingstripleft  {54bp}
+\newlength \gradingstripright  \setlength \gradingstripright {54bp}
+\newlength \gradingstriptop    \setlength \gradingstriptop   {10bp}
+\newlength \gradingstripheight \setlength \gradingstripheight{26bp}
+% Answer box border.
+\newlength \gradingboxrule     \setlength \gradingboxrule    {0.6bp}
+% Height of the box's middle above the baseline of the line it sits in (a
+% macro, so em is the font in force where the box is drawn).
+\newcommand \gradingboxcenter { 0.25em }
+% The top of the paginate.tex band (\PgBandBottom + \PgBandHeight).
+\dim_const:Nn \c__grading_band_top_dim { 42pt }
+
+\NewDocumentCommand \gradingstripfont { }
+  { \normalfont \sffamily \bfseries \fontsize {11} {13} \selectfont }
+
+% ── Messages ──────────────────────────────────────────────────────────────────
+\msg_new:nnn { grading } { missing-key }
+  { \gradedblank~needs~'#1='~(item~'#2'). }
+\msg_new:nnn { grading } { bad-points }
+  { Item~'#1':~points~must~be~a~number,~got~'#2'. }
+\msg_new:nnn { grading } { duplicate-id }
+  { Item~id~'#1'~is~used~twice~in~this~document,~with~different~keys. }
+\msg_new:nnn { grading } { printed-twice }
+  { Item~'#1'~is~printed~twice~(found~in~the~aux~file~from~the~last~run). }
+\msg_new:nnn { grading } { check-not-short }
+  { Item~'#1':~check=~applies~only~to~type=short. }
+\msg_new:nnn { grading } { no-assignment }
+  { No~\gradingassignment{...}~in~this~document;~the~QR~codes~say~'UNSET'. }
+\msg_new:nnn { grading } { rerun }
+  { Grading~box~positions~are~not~known~yet.~Rerun~to~get~them~right. }
+\msg_new:nnn { grading } { in-band }
+  { \gradingmarkbottom~puts~the~bottom~registration~marks~inside~the~
+    paginate.tex~band~(below~42pt). }
+
+% ── Item keys ─────────────────────────────────────────────────────────────────
+\tl_new:N \l__grading_id_tl
+\tl_new:N \l__grading_type_tl
+\tl_new:N \l__grading_points_tl
+\tl_new:N \l__grading_answer_tl
+\tl_new:N \l__grading_check_tl
+\tl_new:N \l__grading_tolerance_tl
+\tl_new:N \l__grading_rubric_tl
+\tl_new:N \l__grading_display_tl
+\tl_new:N \l__grading_item_tl
+\bool_new:N \l__grading_display_bool
+
+\keys_define:nn { grading / item }
+  {
+    id        .tl_set:N = \l__grading_id_tl ,
+    type      .choices:nn = { choice , short , rubric }
+                { \tl_set_eq:NN \l__grading_type_tl \l_keys_choice_tl } ,
+    points    .tl_set:N = \l__grading_points_tl ,
+    answer    .tl_set:N = \l__grading_answer_tl ,
+    check     .choices:nn = { expression , numeric , set , text }
+                { \tl_set_eq:NN \l__grading_check_tl \l_keys_choice_tl } ,
+    tolerance .tl_set:N = \l__grading_tolerance_tl ,
+    rubric    .tl_set:N = \l__grading_rubric_tl ,
+    % What the key prints in the box, when it should differ from answer=.
+    display   .code:n   = { \tl_set:Nn \l__grading_display_tl {#1}
+                            \bool_set_true:N \l__grading_display_bool } ,
+  }
+
+% ── JSON output ───────────────────────────────────────────────────────────────
+% .grading is JSON Lines: XeTeX writes a tab character as the text "^^I", so a
+% tab-separated file would not survive. Strings are detokenized and escaped.
+\iow_new:N \g__grading_iow
+\seq_new:N \g__grading_items_seq
+\prop_new:N \g__grading_ids_prop
+\bool_new:N \g__grading_rerun_bool
+
+\str_const:Nx \c__grading_bsbs_str { \c_backslash_str \c_backslash_str }
+\str_const:Nx \c__grading_quote_str { \tl_to_str:n { " } }
+\str_const:Nx \c__grading_bsquote_str { \c_backslash_str \tl_to_str:n { " } }
+\str_new:N \l__grading_json_str
+
+% \__grading_json:n {tokens} — a quoted, escaped JSON string (not expandable;
+% leaves the result in \l__grading_json_str).
+\cs_new_protected:Npn \__grading_json:n #1
+  {
+    \str_set:Nn \l__grading_json_str {#1}
+    \exp_args:NNVV \str_replace_all:Nnn \l__grading_json_str
+      \c_backslash_str \c__grading_bsbs_str
+    \exp_args:NNVV \str_replace_all:Nnn \l__grading_json_str
+      \c__grading_quote_str \c__grading_bsquote_str
+    \str_set:Nx \l__grading_json_str
+      { \c__grading_quote_str \l__grading_json_str \c__grading_quote_str }
+  }
+\cs_generate_variant:Nn \__grading_json:n { V , x }
+
+\cs_new:Npn \__grading_bp:n #1 { \fp_eval:n { round ( ( #1 ) / 65781.76 , 2 ) } }
+% [x, y, w, h] in bp from dimensions measured from the lower-left corner.
+\cs_new:Npn \__grading_rect:nnnn #1#2#3#4
+  {
+    [ \fp_eval:n { round ( \dim_to_decimal_in_bp:n {#1} , 2 ) } ,
+      \fp_eval:n { round ( \dim_to_decimal_in_bp:n {#2} , 2 ) } ,
+      \fp_eval:n { round ( \dim_to_decimal_in_bp:n {#3} , 2 ) } ,
+      \fp_eval:n { round ( \dim_to_decimal_in_bp:n {#4} , 2 ) } ]
+  }
+\cs_new_protected:Npn \__grading_write:n #1
+  { \iow_now:Nx \g__grading_iow { \c_left_brace_str #1 \c_right_brace_str } }
+
+% ── Fixed page furniture: positions, lower-left corners ──────────────────────
+\cs_new:Npn \__grading_mark_x:n #1
+  { \str_if_eq:nnTF {#1} { l } { \gradingmarkinset }
+      { \paperwidth - \gradingmarkinset - \gradingmarksize } }
+\cs_new:Npn \__grading_mark_y:n #1
+  { \str_if_eq:nnTF {#1} { b } { \gradingmarkbottom }
+      { \paperheight - \gradingmarktop - \gradingmarksize } }
+\cs_new:Npn \__grading_qr_x: { \paperwidth - \gradingqrinset - \gradingqrsize }
+\cs_new:Npn \__grading_qr_y: { \paperheight - \gradingqrtop - \gradingqrsize }
+\cs_new:Npn \__grading_strip_x: { \gradingstripleft }
+\cs_new:Npn \__grading_strip_y:
+  { \paperheight - \gradingstriptop - \gradingstripheight }
+\cs_new:Npn \__grading_strip_w:
+  { \paperwidth - \gradingstripleft - \gradingstripright }
+
+% ── Drawing on every page ─────────────────────────────────────────────────────
+% The shipout/background picture has its origin at the top-left corner; \put
+% takes plain numbers in \unitlength, so every coordinate goes through bp.
+\box_new:N \l__grading_tmp_box
+\cs_new_protected:Npn \__grading_put:nnn #1#2#3
+  {
+    \put ( \dim_to_decimal_in_bp:n {#1} ,
+           \dim_to_decimal_in_bp:n { #2 - \paperheight } ) {#3}
+  }
+% Place a box with its lower-left corner at (#1, #2), whatever its depth.
+\cs_new_protected:Npn \__grading_put_box:nnn #1#2#3
+  {
+    \hbox_set:Nn \l__grading_tmp_box {#3}
+    \__grading_put:nnn {#1} { #2 + \box_dp:N \l__grading_tmp_box }
+      { \box_use:N \l__grading_tmp_box }
+  }
+\cs_new_protected:Npn \__grading_mark:nn #1#2
+  {
+    \__grading_put:nnn { \__grading_mark_x:n {#2} } { \__grading_mark_y:n {#1} }
+      { \rule { \gradingmarksize } { \gradingmarksize } }
+  }
+\tl_new:N \l__grading_qr_tl
+\cs_new_protected:Npn \__grading_decorate:
+  {
+    \group_begin:
+      \setlength \unitlength { 1bp }
+      \color { black }
+      \__grading_mark:nn { t } { l }
+      \__grading_mark:nn { t } { r }
+      \__grading_mark:nn { b } { l }
+      \__grading_mark:nn { b } { r }
+      \tl_set:Nx \l__grading_qr_tl
+        {
+          \tl_if_empty:NTF \g__grading_assignment_tl
+            { UNSET } { \g__grading_assignment_tl }
+          | \int_use:N \ReadonlyShipoutCounter | \__grading_student:
+        }
+      \__grading_put_box:nnn { \__grading_qr_x: } { \__grading_qr_y: }
+        { \exp_args:NV \__grading_qrcode:n \l__grading_qr_tl }
+      \cs_if_exist:NT \GradingStudentName
+        {
+          \__grading_put_box:nnn { \__grading_strip_x: } { \__grading_strip_y: }
+            { \__grading_strip:n { \GradingStudentName } }
+        }
+    \group_end:
+  }
+\cs_new_protected:Npn \__grading_qrcode:n #1
+  { \qrcode [ height = \gradingqrsize , level = M ] {#1} }
+% The name, vertically centred in the strip, scaled down if it would overrun.
+\cs_new_protected:Npn \__grading_strip:n #1
+  {
+    \hbox_set:Nn \l__grading_tmp_box { \gradingstripfont #1 }
+    \dim_compare:nNnT { \box_wd:N \l__grading_tmp_box } > { \__grading_strip_w: }
+      { \box_resize_to_wd:Nn \l__grading_tmp_box { \__grading_strip_w: } }
+    \dim_compare:nNnT
+      { \box_ht:N \l__grading_tmp_box + \box_dp:N \l__grading_tmp_box }
+      > { \gradingstripheight }
+      { \box_resize_to_ht_plus_dp:Nn \l__grading_tmp_box { \gradingstripheight } }
+    \vbox_to_ht:nn { \gradingstripheight }
+      { \tex_vss:D \hbox_to_wd:nn { \__grading_strip_w: }
+          { \box_use:N \l__grading_tmp_box \tex_hss:D } \tex_vss:D }
+  }
+\AddToHook { shipout / background } { \__grading_decorate: }
+
+\AtBeginDocument
+  {
+    \dim_compare:nNnT { \gradingmarkbottom } < { \c__grading_band_top_dim + 2pt }
+      { \msg_error:nn { grading } { in-band } }
+    \@ifundefinedcolor { keyred }
+      { \colorlet { gradingkey } { red!75!black } }
+      { \colorlet { gradingkey } { keyred } }
+  }
+
+% ── \gradedblank ──────────────────────────────────────────────────────────────
+\dim_new:N \l__grading_w_dim
+\dim_new:N \l__grading_h_dim
+\fp_new:N \l__grading_scale_fp
+
+\NewDocumentCommand \gradedblank { O{} m m }
+  {
+    \group_begin:
+      \keys_set:nn { grading / item } {#1}
+      \__grading_validate:
+      \dim_set:Nn \l__grading_w_dim {#2}
+      \dim_set:Nn \l__grading_h_dim {#3}
+      \__grading_register:
+      \__grading_draw:
+    \group_end:
+  }
+
+\cs_new_protected:Npn \__grading_validate:
+  {
+    \tl_if_empty:NT \l__grading_id_tl
+      { \msg_error:nnnn { grading } { missing-key } { id } { ? } }
+    \tl_if_empty:NT \l__grading_type_tl
+      { \msg_error:nnxx { grading } { missing-key } { type } { \l__grading_id_tl } }
+    \tl_if_empty:NT \l__grading_points_tl
+      { \msg_error:nnxx { grading } { missing-key } { points } { \l__grading_id_tl } }
+    \regex_match:nVF { \A \d+ (\.\d+)? \Z } \l__grading_points_tl
+      {
+        \msg_error:nnxx { grading } { bad-points }
+          { \l__grading_id_tl } { \l__grading_points_tl }
+        \tl_set:Nn \l__grading_points_tl { 0 }
+      }
+    \str_if_eq:VnTF \l__grading_type_tl { short }
+      { \tl_if_empty:NT \l__grading_check_tl
+          { \tl_set:Nn \l__grading_check_tl { expression } } }
+      { \tl_if_empty:NF \l__grading_check_tl
+          { \msg_error:nnx { grading } { check-not-short } { \l__grading_id_tl } } }
+    \tl_if_empty:NF \l__grading_type_tl
+      { \tl_if_empty:NT \l__grading_answer_tl
+          { \str_if_eq:VnF \l__grading_type_tl { rubric }
+              { \msg_error:nnxx { grading } { missing-key } { answer }
+                  { \l__grading_id_tl } } } }
+  }
+
+% Remember the item; its JSON line is written at the end of the document, when
+% the positions from the previous run (zref) are known. tabularx and tcolorbox
+% typeset their contents more than once to measure them, so an id seen again
+% with exactly the same keys is a trial pass and is ignored; the same id with
+% different keys is an error. An identical item really printed twice is caught
+% from the aux file instead: see \grading@shipped below.
+\cs_new_protected:Npn \__grading_register:
+  {
+    \__grading_item_json:
+    \prop_get:NVNTF \g__grading_ids_prop \l__grading_id_tl \l__grading_seen_tl
+      {
+        \tl_if_eq:NNF \l__grading_seen_tl \l__grading_item_tl
+          { \msg_error:nnx { grading } { duplicate-id } { \l__grading_id_tl } }
+      }
+      {
+        \prop_gput:NVV \g__grading_ids_prop \l__grading_id_tl \l__grading_item_tl
+        \seq_gput_right:Nx \g__grading_items_seq
+          { { \tl_to_str:N \l__grading_id_tl } { \exp_not:V \l__grading_item_tl } }
+      }
+  }
+\tl_new:N \l__grading_seen_tl
+\cs_new_protected:Npn \__grading_item_json:
+  {
+    \tl_clear:N \l__grading_item_tl
+    \__grading_json:V \l__grading_id_tl
+    \tl_put_right:Nx \l__grading_item_tl { "id": \l__grading_json_str , }
+    \tl_put_right:Nx \l__grading_item_tl { "type":" \l__grading_type_tl ", }
+    \tl_put_right:Nx \l__grading_item_tl { "points": \l__grading_points_tl , }
+    \__grading_json:V \l__grading_answer_tl
+    \tl_put_right:Nx \l__grading_item_tl { "answer": \l__grading_json_str , }
+    \tl_put_right:Nx \l__grading_item_tl { "check":" \l__grading_check_tl ", }
+    \tl_if_empty:NF \l__grading_tolerance_tl
+      {
+        \__grading_json:V \l__grading_tolerance_tl
+        \tl_put_right:Nx \l__grading_item_tl { "tolerance": \l__grading_json_str , }
+      }
+    \tl_if_empty:NF \l__grading_rubric_tl
+      {
+        \__grading_json:V \l__grading_rubric_tl
+        \tl_put_right:Nx \l__grading_item_tl { "rubric": \l__grading_json_str , }
+      }
+  }
+
+% The box: a fixed w x h hbox, centred on the surrounding text line (its middle
+% sits \gradingboxcenter above the baseline). Its lower-left and upper-right
+% corners are saved with zref-savepos where they are actually drawn. In key
+% mode the answer is centred inside, scaled down to fit — never enlarging the
+% box, so the key keeps every line and page break of the blank.
+\box_new:N \l__grading_item_box
+\cs_new_protected:Npn \__grading_draw:
+  {
+    \mode_leave_vertical:
+    \hbox_set_to_wd:Nnn \l__grading_item_box { \l__grading_w_dim }
+      {
+        \zsavepos { grading: \l__grading_id_tl :ll }
+        \hbox_overlap_right:n { \__grading_frame: }
+        \legacy_if:nT { gradingkey }
+          { \hbox_overlap_right:n { \__grading_answer: } }
+        \tex_hfil:D
+        \raisebox { \l__grading_h_dim } { \zsavepos { grading: \l__grading_id_tl :ur } }
+        \iow_shipout:Nx \@auxout
+          { \token_to_str:N \grading@shipped { \l__grading_id_tl } }
+      }
+    \box_move_down:nn
+      { \dim_max:nn { 0pt } { \l__grading_h_dim / 2 - \gradingboxcenter } }
+      { \box_use_drop:N \l__grading_item_box }
+  }
+\cs_new_protected:Npn \__grading_frame:
+  {
+    \rule { \l__grading_w_dim } { \gradingboxrule }
+    \tex_kern:D - \l__grading_w_dim
+    \rule [ \dim_eval:n { \l__grading_h_dim - \gradingboxrule } ] { \l__grading_w_dim } { \gradingboxrule }
+    \tex_kern:D - \l__grading_w_dim
+    \rule { \gradingboxrule } { \l__grading_h_dim }
+    \tex_kern:D \dim_eval:n { \l__grading_w_dim - 2 \gradingboxrule }
+    \rule { \gradingboxrule } { \l__grading_h_dim }
+  }
+\cs_new_protected:Npn \__grading_answer:
+  {
+    \bool_if:NF \l__grading_display_bool
+      {
+        % Short answers are math unless checked as text; the rest print as is.
+        \tl_set_eq:NN \l__grading_display_tl \l__grading_answer_tl
+        \bool_lazy_and:nnT
+          { \str_if_eq_p:Vn \l__grading_type_tl { short } }
+          { ! \str_if_eq_p:Vn \l__grading_check_tl { text } }
+          { \tl_set:Nx \l__grading_display_tl
+              { \c_math_toggle_token \exp_not:V \l__grading_answer_tl \c_math_toggle_token } }
+      }
+    \str_if_eq:VnTF \l__grading_type_tl { rubric }
+      {
+        \hbox_set:Nn \l__grading_tmp_box
+          {
+            \parbox { \dim_eval:n { \l__grading_w_dim - 10bp } }
+              { \raggedright \small \color { gradingkey } \l__grading_display_tl }
+          }
+      }
+      {
+        \hbox_set:Nn \l__grading_tmp_box
+          { \color { gradingkey } \bfseries \l__grading_display_tl }
+      }
+    \__grading_fit:
+    \vbox_to_ht:nn { \l__grading_h_dim }
+      {
+        \tex_vss:D
+        \hbox_to_wd:nn { \l__grading_w_dim }
+          { \tex_hss:D \box_use:N \l__grading_tmp_box \tex_hss:D }
+        \tex_vss:D
+      }
+  }
+% Shrink \l__grading_tmp_box to fit 5bp inside the frame on every side.
+\cs_new_protected:Npn \__grading_fit:
+  {
+    \dim_compare:nNnT { \box_wd:N \l__grading_tmp_box } > { 0pt }
+      {
+        \fp_set:Nn \l__grading_scale_fp
+          {
+            min ( 1 ,
+              \dim_to_fp:n { \l__grading_w_dim - 10bp }
+                / \dim_to_fp:n { \box_wd:N \l__grading_tmp_box } ,
+              \dim_to_fp:n { \l__grading_h_dim - 6bp }
+                / \dim_to_fp:n { \box_ht:N \l__grading_tmp_box
+                                 + \box_dp:N \l__grading_tmp_box + 0.01pt } )
+          }
+        \fp_compare:nNnT { \l__grading_scale_fp } < { 1 }
+          { \box_scale:Nnn \l__grading_tmp_box
+              { \l__grading_scale_fp } { \l__grading_scale_fp } }
+      }
+  }
+
+% ── Items printed twice ──────────────────────────────────────────────────────
+% Every box that is actually shipped writes \grading@shipped{id} to the aux
+% file (trial typesetting by tabularx or tcolorbox ships nothing). Reading the
+% aux at \begin{document}, an id met twice is an item printed twice.
+\bool_new:N \g__grading_reading_aux_bool
+\prop_new:N \g__grading_shipped_prop
+\seq_new:N \g__grading_twice_seq
+\cs_new_protected:Npn \grading@shipped #1
+  {
+    \bool_if:NT \g__grading_reading_aux_bool
+      {
+        \prop_if_in:NnTF \g__grading_shipped_prop {#1}
+          { \seq_gput_right:Nn \g__grading_twice_seq {#1} }
+          { \prop_gput:Nnn \g__grading_shipped_prop {#1} { } }
+      }
+  }
+\AddToHook { begindocument / before }
+  { \bool_gset_true:N \g__grading_reading_aux_bool }
+\cs_new_protected:Npn \__grading_check_twice:
+  {
+    \bool_gset_false:N \g__grading_reading_aux_bool
+    \seq_gremove_duplicates:N \g__grading_twice_seq
+    \seq_map_inline:Nn \g__grading_twice_seq
+      { \msg_error:nnn { grading } { printed-twice } {##1} }
+  }
+\AddToHook { begindocument } { \__grading_check_twice: }
+
+% ── End of document: write \jobname.grading ──────────────────────────────────
+\cs_new:Npn \__grading_pos:nn #1#2 { \zref@extractdefault {#1} {#2} { 0 } }
+
+\cs_new_protected:Npn \__grading_write_item:nn #1#2
+  {
+    \zref@ifrefundefined { grading:#1:ur }
+      { \bool_gset_true:N \g__grading_rerun_bool } { }
+    \__grading_write:n
+      {
+        "kind":"item", "assignment": \l__grading_json_str , #2
+        "page": \__grading_pos:nn { grading:#1:ll } { abspage } ,
+        "box": [
+          \__grading_bp:n { \__grading_pos:nn { grading:#1:ll } { posx } } ,
+          \__grading_bp:n { \__grading_pos:nn { grading:#1:ll } { posy } } ,
+          \__grading_bp:n { \__grading_pos:nn { grading:#1:ur } { posx }
+                            - \__grading_pos:nn { grading:#1:ll } { posx } } ,
+          \__grading_bp:n { \__grading_pos:nn { grading:#1:ur } { posy }
+                            - \__grading_pos:nn { grading:#1:ll } { posy } } ]
+      }
+  }
+
+\cs_new_protected:Npn \__grading_write_mark:nn #1#2
+  {
+    \__grading_write:n
+      {
+        "kind":"mark", "corner":" #1 #2 ",
+        "box": \__grading_rect:nnnn { \__grading_mark_x:n {#2} }
+          { \__grading_mark_y:n {#1} } { \gradingmarksize } { \gradingmarksize }
+      }
+  }
+
+\cs_new_protected:Npn \__grading_finish:
+  {
+    \tl_if_empty:NT \g__grading_assignment_tl
+      { \msg_warning:nn { grading } { no-assignment } }
+    \iow_open:Nn \g__grading_iow { \c_sys_jobname_str .grading }
+    \__grading_json:x
+      { \tl_if_empty:NTF \g__grading_course_tl { } { \g__grading_course_tl } }
+    \__grading_write:n
+      {
+        "kind":"meta", "format":1, "course": \l__grading_json_str ,
+        "student":" \__grading_student: ",
+        "key": \legacy_if:nTF { gradingkey } { true } { false } ,
+        "pages": \int_use:N \ReadonlyShipoutCounter ,
+        "paper": [ \fp_eval:n { round ( \dim_to_decimal_in_bp:n { \paperwidth } , 2 ) } ,
+                   \fp_eval:n { round ( \dim_to_decimal_in_bp:n { \paperheight } , 2 ) } ]
+      }
+    \__grading_write:n
+      {
+        "kind":"strip",
+        "box": \__grading_rect:nnnn { \__grading_strip_x: } { \__grading_strip_y: }
+          { \__grading_strip_w: } { \gradingstripheight }
+      }
+    \__grading_write_mark:nn { t } { l }
+    \__grading_write_mark:nn { t } { r }
+    \__grading_write_mark:nn { b } { l }
+    \__grading_write_mark:nn { b } { r }
+    \__grading_write:n
+      {
+        "kind":"qr",
+        "box": \__grading_rect:nnnn { \__grading_qr_x: } { \__grading_qr_y: }
+          { \gradingqrsize } { \gradingqrsize }
+      }
+    \__grading_json:x
+      {
+        \tl_if_empty:NTF \g__grading_assignment_tl
+          { UNSET } { \g__grading_assignment_tl }
+      }
+    \seq_map_inline:Nn \g__grading_items_seq { \__grading_write_item:nn ##1 }
+    \iow_close:N \g__grading_iow
+    \bool_if:NT \g__grading_rerun_bool
+      { \msg_warning:nn { grading } { rerun } }
+  }
+\AddToHook { enddocument / afterlastpage } { \__grading_finish: }

@@ -1,0 +1,29 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{example-article}[2026/10/21 Stand-in for a course article preamble]
+
+% The page geometry of algebra2-article.sty, which grading.sty is laid out for.
+\RequirePackage[letterpaper, margin=0.75in, top=0.6in, bottom=0.75in]{geometry}
+\RequirePackage{xcolor}
+\RequirePackage{enumitem}
+\RequirePackage{amsmath,amssymb}
+\RequirePackage{array}
+\RequirePackage{grading}
+
+\definecolor{forest}{HTML}{1E5631}
+\definecolor{keyred}{HTML}{B22222}
+
+\setlist[enumerate]{leftmargin=1.5em, itemsep=0.4em, topsep=0.3em}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{3pt}
+
+\newcommand{\pageheader}[2]{%
+    \noindent
+    \colorbox{forest}{%
+        \parbox{\dimexpr\linewidth}{%
+            \vspace{6pt}%
+            \color{white}\textbf{\large Algebra 2 \hfill #1}\\[2pt]%
+            {\small\textbf{#2}\strut}%
+            \vspace{6pt}%
+        }%
+    }%
+    \vspace{1.5em}\par\noindent}
