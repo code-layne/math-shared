@@ -1,0 +1,15 @@
+build/
+target/
+*.aux
+*.log
+*.fls
+*.fdb_latexmk
+*.xdv
+*.grading
+__pycache__/
+
+# roster-map.csv pairs student names with tracking ids. It must never be
+# committed; scripts/roster_import.py also refuses to write inside a work tree.
+# The one exception is the invented three-student roster the tests use.
+roster-map.csv
+!/examples/roster-map.csv

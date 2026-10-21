@@ -1,0 +1,53 @@
+%! Sample graded exit ticket — one item of each type (Answer Key)
+\documentclass[10pt]{article}
+\usepackage{example-key}
+\gradingassignment{sample-u0-l1-et}
+\gradingcourse{example}
+
+\begin{document}
+
+\pageheader{Unit 0, Lesson 0.1}{Exit Ticket --- Answer Key}
+
+Write each final answer inside its box. Show your work outside the boxes.
+
+\begin{enumerate}[leftmargin=1.8em, itemsep=14pt]
+  \item \textbf{Multiple choice.} Which expression is equivalent to $(3x - 4)^2$?
+    \begin{enumerate}[label=\Alph*., leftmargin=1.9em, itemsep=1pt]
+      \item $9x^2 - 16$
+      \item $9x^2 + 16$
+      \item $9x^2 - 12x + 16$
+      \item $9x^2 - 24x + 16$
+    \end{enumerate}
+    \textit{Letter:} \gradedblank[id=et1, type=choice, points=1, answer=D]{0.5in}{0.4in}
+
+  \item \textbf{Solve.} $2x - 3 = 0$ \hfill
+    \gradedblank[id=et2, type=short, points=2, answer={3/2}]{1.5in}{0.5in}
+
+  \item \textbf{Fill in the table} for $f(x) = x^2 - 4$.
+
+    \vspace{4pt}
+    \renewcommand{\arraystretch}{1.6}
+    \begin{tabular}{ccc}
+    $x$ & $f(x)$ & Zeros of $f$ \\
+    $3$ & \gradedblank[id=et3, type=short, points=1, answer=5, check=numeric, tolerance=0]{0.9in}{0.35in}
+        & \gradedblank[id=et4, type=short, points=2, answer={-2, 2}, check=set]{1.2in}{0.35in}
+    \end{tabular}
+
+  \item \textbf{End behavior.} As $x \to +\infty$, does $f(x) = x^3 - 2x$ increase or decrease?
+
+    \gradedblank[id=et5, type=short, points=1, answer=increasing, check=text]{1.6in}{0.4in}
+\end{enumerate}
+
+\newpage
+
+\begin{enumerate}[resume, leftmargin=1.8em]
+  \item \textbf{Explain.} A table shows a linear relationship with slope $2.5$ between hours
+    worked and pay in dollars. Interpret the slope in context.
+
+    \vspace{6pt}
+    \gradedblank[id=et6, type=rubric, points=4,
+      display={For each additional hour worked, the predicted pay increases by
+      \$2.50 (2.5 dollars per hour).}]{\linewidth}{1.6in}
+\end{enumerate}
+
+\end{document}
