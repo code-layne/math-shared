@@ -96,6 +96,27 @@ class ManifestTest(unittest.TestCase):
         self.assertEqual(manifest.main(["check", str(blank), str(blank)]), 0)
         self.assertEqual(manifest.main(["check", str(blank), str(key)]), 1)
 
+    def test_cover_tex(self):
+        path = self.grading("c.grading")
+        lines = path.read_text().splitlines()
+        lines[0] = json.dumps(dict(META, assignment="alg2-3.4-et",
+                                   title="Lesson 3.4 Exit Ticket: f(x) & 50%"))
+        path.write_text("\n".join(lines) + "\n")
+        self.assertEqual(manifest.cover_tex(path),
+                         "\\def\\CoverAssignment{alg2-3.4-et}\\def\\CoverCourse{example}"
+                         "\\def\\CoverTitle{Lesson 3.4 Exit Ticket{\\char58} f{\\char40}x"
+                         "{\\char41} {\\char38} 50{\\char37}}"
+                         "\\def\\CoverQRSize{32bp}\\def\\CoverQRInset{14bp}"
+                         "\\def\\CoverQRTop{40bp}")
+        self.assertEqual(self.build()["title"], "")
+
+    def test_cover_tex_refuses_unsafe_assignment(self):
+        def unsafe(items):
+            for i in items:
+                i["assignment"] = 'et"; rm -rf ~'
+        with self.assertRaises(manifest.ManifestError):
+            manifest.cover_tex(self.grading("u.grading", change=unsafe))
+
     def test_unresolved_positions_are_an_error(self):
         def unplaced(items):
             items[0]["page"] = 0

@@ -1,0 +1,61 @@
+%! cover.tex — the name cover sheet on top of one student's personalized copy.
+%
+% Built once per student by `make -f grading.mk grading-covers`, which runs
+%
+%   latexmk -xelatex -jobname=cover-K7QM2P -usepretex='\def\GradingStudentID{K7QM2P}%
+%     \def\CoverPreferredName{Avery}\def\CoverLastName{Example}%
+%     \def\CoverAssignment{...}\def\CoverCourse{...}\def\CoverTitle{...}%
+%     \def\CoverQRSize{32bp}\def\CoverQRInset{14bp}\def\CoverQRTop{40bp}' cover.tex
+%
+% The names come from roster_tex.py and the rest from `manifest.py cover-tex`
+% on the blank build, all TeX-escaped. The QR code ("COVER|assignment|id") is
+% drawn by grading.sty in cover mode at the blank's QR position and size, so
+% ingest finds it the same way it finds a graded page's, and discards the page.
+% No registration marks, no id strip. This is the only page that carries a
+% name; it is handed out, then removed before the packet is scanned.
+\documentclass[11pt]{article}
+\usepackage[letterpaper, margin=0.75in, top=0.6in, bottom=0.75in]{geometry}
+\usepackage{graphicx}
+\usepackage[cover]{grading}
+\pagestyle{empty}
+
+% Placeholders, so a plain `latexmk -xelatex cover.tex` shows the layout.
+\providecommand\CoverPreferredName{Preferred}
+\providecommand\CoverLastName{Last}
+\providecommand\CoverAssignment{UNSET}
+\providecommand\CoverCourse{Course}
+\providecommand\CoverTitle{Assignment title}
+\providecommand\CoverQRSize{32bp}
+\providecommand\CoverQRInset{14bp}
+\providecommand\CoverQRTop{40bp}
+
+\expandafter\gradingassignment\expandafter{\CoverAssignment}
+\setlength\gradingqrsize{\CoverQRSize}
+\setlength\gradingqrinset{\CoverQRInset}
+\setlength\gradingqrtop{\CoverQRTop}
+
+% Set #1 at its natural size, or scaled down to the line if it is wider.
+\newsavebox\coverbox
+\newcommand\coverfit[1]{%
+  \sbox\coverbox{#1}%
+  \ifdim\wd\coverbox>\linewidth \resizebox{\linewidth}{!}{\usebox\coverbox}%
+  \else \usebox\coverbox \fi}
+
+\begin{document}
+\sffamily
+\vspace*{1.5in}
+\begin{center}
+  \coverfit{\fontsize{60}{66}\selectfont\bfseries \CoverPreferredName}\par
+  \vspace{14pt}
+  \coverfit{\fontsize{26}{30}\selectfont \CoverLastName}\par
+  \vspace{1.2in}
+  {\large \CoverCourse\par}
+  \vspace{8pt}
+  \coverfit{\Large\bfseries \CoverTitle}\par
+  \vspace{8pt}
+  {\large ID: \ifdefined\GradingStudentID \GradingStudentID \else MASTER\fi\par}
+  \vfill
+  {\large\bfseries Remove this sheet before turning in. Do not scan it.\par}
+\end{center}
+\vspace*{0.4in}
+\end{document}
