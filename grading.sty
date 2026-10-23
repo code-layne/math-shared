@@ -1,5 +1,5 @@
 % grading.sty — graded answer boxes, registration marks, page QR codes and the
-% student name strip, for the packet-based courses. See README.md and
+% tracking-id strip, for the packet-based courses. See README.md and
 % grading-system-design.md.
 %
 % A graded item is authored identically in the blank component and its key:
@@ -18,8 +18,12 @@
 %   - four corner registration marks, in the side margins;
 %   - a QR code encoding "assignment|page|trackingid" in the right margin, just
 %     under the top-right mark;
-%   - the name strip, a fixed rectangle in the top margin holding
-%     \GradingStudentName. Ingest blanks exactly this rectangle on every scan.
+%   - the id strip, a fixed rectangle in the top margin holding
+%     "ID: \GradingStudentID", and empty when that is undefined. A graded page
+%     never carries a student name: scans go to an outside API. The name is
+%     printed only on the cover sheet (cover.tex), which is never scanned.
+%     \GradingStudentName, if a document still defines it, is ignored with a
+%     warning.
 % Nothing is drawn in the bottom margin: shared/paginate.tex whites out a band
 % there (10pt–42pt above the page edge) to renumber packet pages.
 %
@@ -27,10 +31,14 @@
 % margins 0.75in, top 0.6in). Every position below is a length you can reset
 % in a course preamble; the defaults keep 4bp or more between each element and
 % the text block.
+%
+% \usepackage[cover]{grading} is the cover sheet's mode (see cover.tex): the
+% QR code alone, in the same place, encoding "COVER|assignment|trackingid"; no
+% registration marks, no strip, no .grading file.
 
 \NeedsTeXFormat{LaTeX2e}[2022/06/01]
-\ProvidesExplPackage{grading}{2026/10/21}{0.1}
-  {Graded answer boxes, registration marks, QR codes and name strip}
+\ProvidesExplPackage{grading}{2026/10/23}{0.2}
+  {Graded answer boxes, registration marks, QR codes and id strip}
 
 \RequirePackage{xcolor}
 \RequirePackage{zref-savepos}
@@ -46,15 +54,21 @@
 % It is also safe for a key package to define the switch itself first.
 \cs_if_exist:NF \ifgradingkey { \newif \ifgradingkey }
 \DeclareOption { key } { \gradingkeytrue }
+\bool_new:N \g__grading_cover_bool
+\DeclareOption { cover } { \bool_gset_true:N \g__grading_cover_bool }
 \ProcessOptions \scan_stop:
 
 % ── Document identity ─────────────────────────────────────────────────────────
 \tl_new:N \g__grading_assignment_tl
 \tl_new:N \g__grading_course_tl
+\tl_new:N \g__grading_title_tl
 \NewDocumentCommand \gradingassignment { m }
   { \tl_gset:Nx \g__grading_assignment_tl { \tl_to_str:n {#1} } }
 \NewDocumentCommand \gradingcourse { m }
   { \tl_gset:Nx \g__grading_course_tl { \tl_to_str:n {#1} } }
+% The assignment title the cover sheet prints, e.g. {Lesson 3.1 Exit Ticket}.
+\NewDocumentCommand \gradingtitle { m }
+  { \tl_gset:Nx \g__grading_title_tl { \tl_to_str:n {#1} } }
 
 % Tracking id for the QR code: \GradingStudentID if defined, else MASTER.
 \cs_new:Npn \__grading_student: { \cs_if_exist_use:NF \GradingStudentID { MASTER } }
@@ -72,7 +86,7 @@
 \newlength \gradingqrsize      \setlength \gradingqrsize     {32bp}
 \newlength \gradingqrinset     \setlength \gradingqrinset    {14bp}
 \newlength \gradingqrtop       \setlength \gradingqrtop      {40bp}
-% Name strip: the rectangle ingest blanks.
+% Id strip: the rectangle that holds "ID: <tracking id>".
 \newlength \gradingstripleft   \setlength \gradingstripleft  {54bp}
 \newlength \gradingstripright  \setlength \gradingstripright {54bp}
 \newlength \gradingstriptop    \setlength \gradingstriptop   {10bp}
@@ -103,6 +117,10 @@
   { No~\gradingassignment{...}~in~this~document;~the~QR~codes~say~'UNSET'. }
 \msg_new:nnn { grading } { rerun }
   { Grading~box~positions~are~not~known~yet.~Rerun~to~get~them~right. }
+\msg_new:nnn { grading } { name-ignored }
+  { \token_to_str:N \GradingStudentName \c_space_tl is~defined~but~ignored:~
+    graded~pages~carry~only~the~tracking~id.~Names~go~on~the~cover~sheet~
+    (cover.tex). }
 \msg_new:nnn { grading } { in-band }
   { \gradingmarkbottom~puts~the~bottom~registration~marks~inside~the~
     paginate.tex~band~(below~42pt). }
@@ -211,33 +229,41 @@
       { \rule { \gradingmarksize } { \gradingmarksize } }
   }
 \tl_new:N \l__grading_qr_tl
+\cs_new:Npn \__grading_assignment:
+  { \tl_if_empty:NTF \g__grading_assignment_tl { UNSET } { \g__grading_assignment_tl } }
 \cs_new_protected:Npn \__grading_decorate:
   {
     \group_begin:
       \setlength \unitlength { 1bp }
       \color { black }
-      \__grading_mark:nn { t } { l }
-      \__grading_mark:nn { t } { r }
-      \__grading_mark:nn { b } { l }
-      \__grading_mark:nn { b } { r }
-      \tl_set:Nx \l__grading_qr_tl
+      \bool_if:NTF \g__grading_cover_bool
         {
-          \tl_if_empty:NTF \g__grading_assignment_tl
-            { UNSET } { \g__grading_assignment_tl }
-          | \int_use:N \ReadonlyShipoutCounter | \__grading_student:
+          \tl_set:Nx \l__grading_qr_tl
+            { COVER | \__grading_assignment: | \__grading_student: }
+        }
+        {
+          \__grading_mark:nn { t } { l }
+          \__grading_mark:nn { t } { r }
+          \__grading_mark:nn { b } { l }
+          \__grading_mark:nn { b } { r }
+          \tl_set:Nx \l__grading_qr_tl
+            {
+              \__grading_assignment:
+              | \int_use:N \ReadonlyShipoutCounter | \__grading_student:
+            }
+          \cs_if_exist:NT \GradingStudentID
+            {
+              \__grading_put_box:nnn { \__grading_strip_x: } { \__grading_strip_y: }
+                { \__grading_strip:n { ID:~\GradingStudentID } }
+            }
         }
       \__grading_put_box:nnn { \__grading_qr_x: } { \__grading_qr_y: }
         { \exp_args:NV \__grading_qrcode:n \l__grading_qr_tl }
-      \cs_if_exist:NT \GradingStudentName
-        {
-          \__grading_put_box:nnn { \__grading_strip_x: } { \__grading_strip_y: }
-            { \__grading_strip:n { \GradingStudentName } }
-        }
     \group_end:
   }
 \cs_new_protected:Npn \__grading_qrcode:n #1
   { \qrcode [ height = \gradingqrsize , level = M ] {#1} }
-% The name, vertically centred in the strip, scaled down if it would overrun.
+% The strip text, vertically centred, scaled down if it would overrun.
 \cs_new_protected:Npn \__grading_strip:n #1
   {
     \hbox_set:Nn \l__grading_tmp_box { \gradingstripfont #1 }
@@ -257,6 +283,8 @@
   {
     \dim_compare:nNnT { \gradingmarkbottom } < { \c__grading_band_top_dim + 2pt }
       { \msg_error:nn { grading } { in-band } }
+    \cs_if_exist:NT \GradingStudentName
+      { \msg_warning:nn { grading } { name-ignored } }
     \@ifundefinedcolor { keyred }
       { \colorlet { gradingkey } { red!75!black } }
       { \colorlet { gradingkey } { keyred } }
@@ -498,12 +526,18 @@
     \tl_if_empty:NT \g__grading_assignment_tl
       { \msg_warning:nn { grading } { no-assignment } }
     \iow_open:Nn \g__grading_iow { \c_sys_jobname_str .grading }
+    \__grading_json:x { \__grading_assignment: }
+    \str_set_eq:NN \l__grading_assignment_json_str \l__grading_json_str
+    \__grading_json:V \g__grading_title_tl
+    \str_set_eq:NN \l__grading_title_json_str \l__grading_json_str
     \__grading_json:x
       { \tl_if_empty:NTF \g__grading_course_tl { } { \g__grading_course_tl } }
     \__grading_write:n
       {
         "kind":"meta", "format":1, "course": \l__grading_json_str ,
         "student":" \__grading_student: ",
+        "assignment": \l__grading_assignment_json_str ,
+        "title": \l__grading_title_json_str ,
         "key": \legacy_if:nTF { gradingkey } { true } { false } ,
         "pages": \int_use:N \ReadonlyShipoutCounter ,
         "paper": [ \fp_eval:n { round ( \dim_to_decimal_in_bp:n { \paperwidth } , 2 ) } ,
@@ -525,14 +559,13 @@
         "box": \__grading_rect:nnnn { \__grading_qr_x: } { \__grading_qr_y: }
           { \gradingqrsize } { \gradingqrsize }
       }
-    \__grading_json:x
-      {
-        \tl_if_empty:NTF \g__grading_assignment_tl
-          { UNSET } { \g__grading_assignment_tl }
-      }
+    \__grading_json:x { \__grading_assignment: }
     \seq_map_inline:Nn \g__grading_items_seq { \__grading_write_item:nn ##1 }
     \iow_close:N \g__grading_iow
     \bool_if:NT \g__grading_rerun_bool
       { \msg_warning:nn { grading } { rerun } }
   }
-\AddToHook { enddocument / afterlastpage } { \__grading_finish: }
+\str_new:N \l__grading_assignment_json_str
+\str_new:N \l__grading_title_json_str
+\AddToHook { enddocument / afterlastpage }
+  { \bool_if:NF \g__grading_cover_bool { \__grading_finish: } }

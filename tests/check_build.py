@@ -3,20 +3,30 @@
 
     check_build.py GRADING_OUT ROSTER
 
-Expects GRADING_OUT to hold blank/, key/, students/, manifest.json,
-key-manifest.json and personalized.pdf. Checks that
+Expects GRADING_OUT to hold blank/, key/, students/, covers/, packets/,
+manifest.json, key-manifest.json and personalized.pdf. Checks that
 
-  - the blank, the key and every personalized copy have the same page count;
+  - the blank, the key and every personalized copy have the same page count,
+    and each cover is one page;
+  - personalized.pdf is, for each student in roster order, her cover, a blank
+    back, then her copy padded with blank pages to an even count: every cover
+    starts on an odd page and every copy on a fresh sheet;
   - every QR code on every page decodes to "assignment|page|trackingid"
     (MASTER for the blank and key builds, the roster's ids in roster order for
-    personalized.pdf);
+    personalized.pdf), each cover's to "COVER|assignment|trackingid", and the
+    blank backs and padding pages carry nothing;
   - every box in manifest.json lands on a drawn box: the border is dark, the
     inside is empty in the blank and holds ink in the key;
   - the registration marks and QR code are where the .grading file says, and
     nothing grading.sty draws enters the text block or the paginate.tex band;
-  - the name strip is empty in the blank and holds the name in each copy;
+  - each cover's QR code fills the graded pages' QR rectangle, and the cover
+    has no registration marks and nothing in the strip;
+  - the id strip is empty in the blank and reads "ID: <tracking id>" in each
+    copy;
   - each personalized page matches the blank page everywhere outside the
     strip and the QR code.
+
+The name grep is scripts/check_names.py, which make test runs separately.
 
 Renders with pdftoppm and decodes with zbarimg (or the zxingcpp module), the
 same poppler tools the course builds already use; pixels are read from PGM, so
@@ -117,6 +127,32 @@ def render(pdf, page, tmp, page_h):
     return p
 
 
+def strip_text(pdf, page, strip, page_h):
+    """The text pdftotext finds inside the strip rectangle."""
+    x, y, w, h = strip
+    out = subprocess.run(
+        ["pdftotext", "-f", str(page), "-l", str(page), "-r", "72",
+         "-x", str(int(x)), "-y", str(int(page_h - y - h)), "-W", str(int(w) + 1),
+         "-H", str(int(h) + 1), str(pdf), "-"], capture_output=True, text=True, check=True)
+    return " ".join(out.stdout.split())
+
+
+def ink_bbox(p, x, y, w, h):
+    """Bounding box [x, y, w, h] in bp of the dark pixels in a rectangle."""
+    i0, i1 = int(x * p.s), int((x + w) * p.s)
+    j0, j1 = int((p.page_h - y - h) * p.s), int((p.page_h - y) * p.s)
+    cols, rows = [], []
+    for j in range(max(j0, 0), min(j1, p.h)):
+        for i in range(max(i0, 0), min(i1, p.w)):
+            if p.px[j * p.w + i] < DARK:
+                cols.append(i)
+                rows.append(j)
+    if not cols:
+        return None
+    return [min(cols) / p.s, p.page_h - (max(rows) + 1) / p.s,
+            (max(cols) + 1 - min(cols)) / p.s, (max(rows) + 1 - min(rows)) / p.s]
+
+
 def check_box(p, q, key):
     x, y, w, h = q["box"]
     e = 1.0  # bp of slack around the 0.6bp border
@@ -149,13 +185,24 @@ def main(out, roster):
     page_w, page_h = manifest["paper"]
     blank, key = out / "blank/main.pdf", out / "key/main.pdf"
     personalized = out / "personalized.pdf"
+    single = sorted(out.glob("student-*.pdf"))
+
+    # One student's run in personalized.pdf: cover, back, copy, padding.
+    per = 2 + n + n % 2
+    layout = ["cover", "back"] + [pg for pg in range(1, n + 1)] + ["pad"] * (n % 2)
 
     print("page counts")
     for pdf in [blank, key] + [out / "students" / f"{i}.pdf" for i in ids]:
         if pages(pdf) != n:
             fail(f"{pdf.name}: {pages(pdf)} pages, the manifest says {n}")
-    if pages(personalized) != n * len(ids):
-        fail(f"personalized.pdf: {pages(personalized)} pages, expected {n * len(ids)}")
+    for i in ids:
+        if pages(out / "covers" / f"cover-{i}.pdf") != 1:
+            fail(f"cover-{i}.pdf: {pages(out / 'covers' / f'cover-{i}.pdf')} pages, expected 1")
+    for pdf in [out / "packets" / f"{i}.pdf" for i in ids] + single:
+        if pages(pdf) != per or pages(pdf) % 2:
+            fail(f"{pdf.name}: {pages(pdf)} pages, expected an even {per}")
+    if pages(personalized) != per * len(ids):
+        fail(f"personalized.pdf: {pages(personalized)} pages, expected {per * len(ids)}")
 
     print("furniture geometry")
     furniture = {"strip": manifest["strip"], "qr": manifest["qr"],
@@ -168,20 +215,35 @@ def main(out, roster):
     if set(manifest["marks"]) != {"tl", "tr", "bl", "br"}:
         fail(f"marks: {sorted(manifest['marks'])}")
 
+    def wanted(tid, what):
+        if what == "cover":
+            return [f"COVER|{assignment}|{tid}"]
+        if what in ("back", "pad"):
+            return []
+        return [f"{assignment}|{what}|{tid}"]
+
     with tempfile.TemporaryDirectory() as tmp:
-        print("QR codes")
-        expected = []
-        for pdf, who in [(blank, ["MASTER"]), (key, ["MASTER"]), (personalized, ids)]:
-            k = 0
-            for tid in who:
-                for pg in range(1, n + 1):
-                    k += 1
-                    want = f"{assignment}|{pg}|{tid}"
-                    got = decode_qr(pdf, k, tmp)
-                    expected.append(want)
-                    if got != [want]:
-                        fail(f"{pdf.name} page {k}: QR {got}, expected {want}")
-        print(f"  {len(expected)} pages decoded")
+        print("QR codes and page order")
+        decoded = 0
+        for pdf, who in [(blank, ["MASTER"]), (key, ["MASTER"])]:
+            for pg in range(1, n + 1):
+                want, got = wanted("MASTER", pg), decode_qr(pdf, pg, tmp)
+                decoded += 1
+                if got != want:
+                    fail(f"{pdf.name} page {pg}: QR {got}, expected {want}")
+        runs = [(personalized, k * per, tid) for k, tid in enumerate(ids)]
+        runs += [(pdf, 0, pdf.stem.split("-", 1)[1]) for pdf in single]
+        for pdf, base, tid in runs:
+            if pdf == personalized and (base + 1) % 2 != 1:
+                fail(f"{tid}: cover on page {base + 1}, an even page")
+            for k, what in enumerate(layout, base + 1):
+                want, got = wanted(tid, what), decode_qr(pdf, k, tmp)
+                decoded += 1
+                if got != want:
+                    fail(f"{pdf.name} page {k} ({tid} {what}): QR {got}, expected {want}")
+            if (base + 3) % 2 != 1:
+                fail(f"{tid}: graded copy starts on page {base + 3}, an even page")
+        print(f"  {decoded} pages decoded")
 
         print("boxes, marks, strip, band")
         renders = {}
@@ -201,22 +263,54 @@ def main(out, roster):
                 if p.darkest(qx, qy, qw, qh) > DARK:
                     fail(f"{label} page {pg}: no QR at {m['qr']}")
                 if min(p.region(*m["strip"])) < WHITE:
-                    fail(f"{label} page {pg}: the name strip is not empty in a MASTER build")
+                    fail(f"{label} page {pg}: the id strip is not empty in a MASTER build")
                 # The band paginate.tex whites out: only the centred page
                 # number may be there, and it is not ours.
                 for x0, x1 in [(0, page_w / 2 - 40), (page_w / 2 + 40, page_w)]:
                     if p.darkest(x0, BAND[0], x1 - x0, BAND[1] - BAND[0]) < WHITE:
                         fail(f"{label} page {pg}: ink in the paginate.tex band")
 
+        print("covers")
+        qx, qy, qw, qh = manifest["qr"]
+        Path(tmp, "c").mkdir()
+        for k, tid in enumerate(ids):
+            p = render(personalized, k * per + 1, f"{tmp}/c", page_h)
+            got = ink_bbox(p, qx - 10, qy - 10, qw + 20, qh + 20)
+            if got is None or any(abs(a - b) > 1.0 for a, b in zip(got, manifest["qr"])):
+                fail(f"{tid} cover: QR ink at {got}, expected {manifest['qr']}")
+            for c, box in manifest["marks"].items():
+                if min(p.region(*box)) < WHITE:
+                    fail(f"{tid} cover: a registration mark ({c}) is printed")
+            if min(p.region(*manifest["strip"])) < WHITE:
+                fail(f"{tid} cover: ink in the id strip")
+            text = subprocess.run(["pdftotext", "-f", str(k * per + 1), "-l", str(k * per + 1),
+                                   str(personalized), "-"], capture_output=True, text=True,
+                                  check=True).stdout
+            if "Remove this sheet before turning in. Do not scan it." not in " ".join(text.split()):
+                fail(f"{tid} cover: no remove-before-scanning line")
+            if f"ID: {tid}" not in text:
+                fail(f"{tid} cover: no tracking id")
+        print(f"  {len(ids)} covers checked")
+
         print("personalized copies")
         sx, sy, sw, sh = manifest["strip"]
-        qx, qy, qw, qh = manifest["qr"]
         Path(tmp, "s").mkdir()
         for k, tid in enumerate(ids):
-            for pg in range(1, n + 1):
-                p = render(personalized, k * n + pg, f"{tmp}/s", page_h)
-                if p.darkest(*manifest["strip"]) > DARK:
-                    fail(f"{tid} page {pg}: no name in the strip")
+            for off, what in enumerate(layout):
+                page = k * per + 1 + off
+                if what in ("back", "pad"):
+                    p = render(personalized, page, f"{tmp}/s", page_h)
+                    if min(p.px) < WHITE:
+                        fail(f"{tid} {what} page {page}: not blank")
+                    continue
+                if what == "cover":
+                    continue
+                pg = what
+                p = render(personalized, page, f"{tmp}/s", page_h)
+                if strip_text(personalized, page, manifest["strip"], page_h) != f"ID: {tid}":
+                    fail(f"{tid} page {pg}: strip reads "
+                         f"{strip_text(personalized, page, manifest['strip'], page_h)!r}, "
+                         f"expected 'ID: {tid}'")
                 b = renders["blank", pg]
                 diff = 0
                 for j in range(p.h):
@@ -236,7 +330,7 @@ def main(out, roster):
                 if diff:
                     fail(f"{tid} page {pg}: {diff} pixels differ from the blank "
                          f"outside the strip and QR code")
-        print(f"  {len(ids)} copies x {n} pages compared")
+        print(f"  {len(ids)} runs x {per} pages checked")
 
     if failures:
         print(f"\n{len(failures)} check(s) failed")

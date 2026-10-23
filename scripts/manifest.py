@@ -3,9 +3,10 @@
 
     manifest.py write BUILD.grading -o manifest.json [--course C] [--lesson-dir DIR]
     manifest.py check BLANK.json KEY.json
+    manifest.py cover-tex BUILD.grading
 
 write reads the .grading file grading.sty leaves next to the PDF (JSON Lines:
-one meta line, the name strip, the four registration marks, the QR code, then
+one meta line, the id strip, the four registration marks, the QR code, then
 one line per graded item) and writes the manifest the grader works from. Build
 it from the blank component's build; a key build may be written too, for check.
 
@@ -13,12 +14,23 @@ check compares a blank manifest with its key's and exits 1 if any item's id,
 type, points, answer or check differs, or an item is missing from either. A
 moved box or a different page count is reported as a warning: the blank's
 layout is the one the scans are aligned to.
+
+cover-tex prints, as one line of TeX for cover.tex's -usepretex, what a cover
+sheet needs from the blank's .grading file: the assignment, course and title,
+and the QR code's size and position, so the cover's QR code sits exactly where
+the graded pages' does. Course and title are TeX-escaped like the roster names
+(see roster_tex.py); the assignment must be [A-Za-z0-9._-], since it goes into
+the QR code as is.
 """
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from roster_tex import tex_escape  # noqa: E402
 
 CHECKS = {"expression", "numeric", "set", "text"}
 TYPES = {"choice", "short", "rubric"}
@@ -65,6 +77,8 @@ def read_grading(path):
 def build(path, course=None, lesson_dir=None):
     meta, strip, marks, qr, items = read_grading(path)
     assignments = {i["assignment"] for i in items}
+    if meta.get("assignment") not in (None, "UNSET"):
+        assignments.add(meta["assignment"])
     if len(assignments) > 1:
         raise ManifestError(f"{path}: items from several assignments: {sorted(assignments)}")
     assignment = assignments.pop() if assignments else None
@@ -99,6 +113,7 @@ def build(path, course=None, lesson_dir=None):
     manifest = {
         "assignment": assignment,
         "course": course or meta.get("course") or "",
+        "title": meta.get("title") or "",
         "pages": meta["pages"],
         "questions": questions,
         "paper": meta["paper"],
@@ -108,6 +123,32 @@ def build(path, course=None, lesson_dir=None):
         "key": meta["key"],
     }
     return manifest, warnings
+
+
+ASSIGNMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def cover_tex(path):
+    """The \\def lines cover.tex reads, from a blank build's .grading file."""
+    meta, _, _, qr, items = read_grading(path)
+    assignment = meta.get("assignment") or next((i["assignment"] for i in items), "UNSET")
+    if assignment == "UNSET":
+        raise ManifestError(f"{path}: the document has no \\gradingassignment")
+    if not ASSIGNMENT_RE.match(assignment):
+        raise ManifestError(f"{path}: assignment {assignment!r} may hold only "
+                            f"letters, digits, '.', '_' and '-'")
+    if qr is None:
+        raise ManifestError(f"{path}: no qr record")
+    (pw, ph), (x, y, w, h) = meta["paper"], qr
+    defs = {
+        "CoverAssignment": assignment,
+        "CoverCourse": tex_escape(meta.get("course") or ""),
+        "CoverTitle": tex_escape(meta.get("title") or assignment),
+        "CoverQRSize": f"{w:g}bp",
+        "CoverQRInset": f"{round(pw - x - w, 2):g}bp",
+        "CoverQRTop": f"{round(ph - y - h, 2):g}bp",
+    }
+    return "".join(f"\\def\\{k}{{{v}}}" for k, v in defs.items())
 
 
 SAME = ("type", "points", "answer", "check")
@@ -152,9 +193,14 @@ def main(argv=None):
     c = sub.add_parser("check", help="compare a blank manifest with its key's")
     c.add_argument("blank")
     c.add_argument("key")
+    t = sub.add_parser("cover-tex", help="print the TeX a cover sheet build reads")
+    t.add_argument("grading")
     args = ap.parse_args(argv)
 
     try:
+        if args.cmd == "cover-tex":
+            print(cover_tex(args.grading))
+            return 0
         if args.cmd == "write":
             manifest, warnings = build(args.grading, args.course, args.lesson_dir)
             for msg in warnings:

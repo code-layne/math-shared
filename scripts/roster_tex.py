@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Print roster-map.csv as build input for grading.mk, in roster order.
 
-Each line is "TRACKINGID<TAB>NAME", where NAME is the student's printed name
-(preferred first name, then last name) encoded as TeX that is safe to pass
+Each line is "TRACKINGID<TAB>PREFERRED<TAB>LAST": the student's preferred name
+and legal last name, for her cover sheet, encoded as TeX that is safe to pass
 through the shell and latexmk: letters, digits, space, period, comma and
-hyphen as is, every other character as {\\char<code>}.
+hyphen as is, every other character as {\\char<code>}. Only the cover build
+reads the names; component builds use --ids-only, so a name never reaches a
+graded page.
 
     roster_tex.py ROSTER [--section NAME] [--id TRACKINGID] [--ids-only]
 """
@@ -15,7 +17,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from roster_import import RosterError, display_name, read_map  # noqa: E402
+from roster_import import RosterError, last_name, read_map  # noqa: E402
 
 SAFE = re.compile(r"[A-Za-z0-9 .,\-]")
 ID_RE = re.compile(r"^[A-Z0-9]{6}$")
@@ -53,7 +55,8 @@ def main(argv=None):
         if args.ids_only:
             print(r["tracking_id"])
         else:
-            print(f"{r['tracking_id']}\t{tex_escape(display_name(r))}")
+            print(f"{r['tracking_id']}\t{tex_escape(r['preferred_name'].strip())}"
+                  f"\t{tex_escape(last_name(r['legal_name']))}")
     return 0
 
 
