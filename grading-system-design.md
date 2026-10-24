@@ -67,7 +67,7 @@ Graded questions are marked in the LaTeX source with an environment from the sha
   "pages": 2,
   "questions": [
     {"id": "et1", "type": "choice", "points": 1, "answer": "C",
-     "page": 1, "box": [72.0, 540.2, 108.0, 43.2]},
+     "page": 1, "box": [72.0, 540.2, 43.2, 43.2]},
     {"id": "et2", "type": "short", "points": 2, "answer": "3/2",
      "check": "expression", "page": 1, "box": [72.0, 460.0, 108.0, 43.2]},
     {"id": "et3", "type": "rubric", "points": 4,
@@ -76,7 +76,7 @@ Graded questions are marked in the LaTeX source with an environment from the sha
 }
 ```
 
-Boxes are in PDF points from the lower-left corner of the page.
+Boxes are in PDF points from the lower-left corner of the page, and record the size actually drawn. Choice boxes are square: the author gives the width and the height follows it. Rubric boxes are at least 2 inches tall, so a written response has room, and the key prints the model answer from the top left of the box. Short-answer boxes are drawn as written. Both rules are settings in the style package.
 
 Short-answer items name how the answer is checked:
 
