@@ -17,6 +17,11 @@ manifest.json, key-manifest.json and personalized.pdf. Checks that
     blank backs and padding pages carry nothing;
   - every box in manifest.json lands on a drawn box: the border is dark, the
     inside is empty in the blank and holds ink in the key;
+  - choice boxes measure square and rubric boxes at least 2in tall, both in
+    the manifest and in the rendered border;
+  - every key answer stays inside its box: the ring just outside each box is
+    the same in the key as in the blank, and the ink inside clears the border.
+    Choice answers are centred; a rubric's display starts at the top left;
   - the registration marks and QR code are where the .grading file says, and
     nothing grading.sty draws enters the text block or the paginate.tex band;
   - each cover's QR code fills the graded pages' QR rectangle, and the cover
@@ -153,6 +158,49 @@ def ink_bbox(p, x, y, w, h):
             (max(cols) + 1 - min(cols)) / p.s, (max(rows) + 1 - min(rows)) / p.s]
 
 
+SQUARE = 0.05     # bp: a choice box's width and height agree to this
+RUBRIC_MIN = 144  # bp (2in): the default \gradingrubricminheight
+
+
+def check_size(p, q, rubric_min=RUBRIC_MIN):
+    """Choice boxes are square and rubric boxes tall enough, as recorded and as drawn."""
+    x, y, w, h = q["box"]
+    if q["type"] == "choice" and abs(w - h) > SQUARE:
+        fail(f"{q['id']}: choice box {q['box']} is not square")
+    if q["type"] == "rubric" and h < rubric_min - SQUARE:
+        fail(f"{q['id']}: rubric box {q['box']} is shorter than {rubric_min}bp")
+    drawn = ink_bbox(p, x - 2, y - 2, w + 4, h + 4)
+    if drawn is None or any(abs(a - b) > 1.0 for a, b in zip(drawn, q["box"])):
+        fail(f"{q['id']}: the drawn border measures {drawn}, the manifest says {q['box']}")
+    return drawn
+
+
+def check_key_fit(p, blank, q):
+    """The key's answer is inside its box and placed for its type."""
+    x, y, w, h = q["box"]
+    ring = 6
+    for rect in [(x - ring, y - ring, w + 2 * ring, ring - 1),       # below
+                 (x - ring, y + h + 1, w + 2 * ring, ring - 1),      # above
+                 (x - ring, y, ring - 1, h),                         # left
+                 (x + w + 1, y, ring - 1, h)]:                       # right
+        if list(p.region(*rect)) != list(blank.region(*rect)):
+            fail(f"{q['id']}: the key answer spills outside its box {q['box']}")
+            return
+    m = 2  # bp inside the border's outer edge, past the 0.6bp rule
+    ink = ink_bbox(p, x + m, y + m, w - 2 * m, h - 2 * m)
+    if ink is None:
+        return  # check_box reports an empty key box
+    ix, iy, iw, ih = ink
+    if ix < x + m + 0.5 or iy < y + m + 0.5 or ix + iw > x + w - m - 0.5 or iy + ih > y + h - m - 0.5:
+        fail(f"{q['id']}: key ink {ink} touches the border of {q['box']}")
+    if q["type"] == "choice":
+        if abs(ix + iw / 2 - (x + w / 2)) > 2 or abs(iy + ih / 2 - (y + h / 2)) > 2:
+            fail(f"{q['id']}: choice answer {ink} is not centred in {q['box']}")
+    if q["type"] == "rubric":
+        if ix - x > 10 or (y + h) - (iy + ih) > 12:
+            fail(f"{q['id']}: rubric display {ink} does not start at the top left of {q['box']}")
+
+
 def check_box(p, q, key):
     x, y, w, h = q["box"]
     e = 1.0  # bp of slack around the 0.6bp border
@@ -254,6 +302,9 @@ def main(out, roster):
                 for q in m["questions"]:
                     if q["page"] == pg:
                         check_box(p, q, key=label == "key")
+                        check_size(p, q)
+                        if label == "key":
+                            check_key_fit(p, renders["blank", pg], q)
                 for c, (x, y, w, h) in m["marks"].items():
                     if p.lightest(x + 1, y + 1, w - 2, h - 2) > DARK:
                         fail(f"{label} page {pg}: mark {c} is not solid at {[x, y, w, h]}")

@@ -93,6 +93,13 @@
 \newlength \gradingstripheight \setlength \gradingstripheight{26bp}
 % Answer box border.
 \newlength \gradingboxrule     \setlength \gradingboxrule    {0.6bp}
+% Box sizes by type. A choice box is as tall as \gradingchoiceheight, whatever
+% height was written; that is a macro evaluated per box with \gradingboxwidth
+% set to the box's width, so the default draws a square. A rubric box is at
+% least \gradingrubricminheight tall. Short boxes are drawn as written.
+\newlength \gradingboxwidth
+\newcommand \gradingchoiceheight { \gradingboxwidth }
+\newlength \gradingrubricminheight \setlength \gradingrubricminheight {2in}
 % Height of the box's middle above the baseline of the line it sits in (a
 % macro, so em is the font in force where the box is drawn).
 \newcommand \gradingboxcenter { 0.25em }
@@ -115,6 +122,9 @@
   { Item~'#1':~check=~applies~only~to~type=short. }
 \msg_new:nnn { grading } { no-assignment }
   { No~\gradingassignment{...}~in~this~document;~the~QR~codes~say~'UNSET'. }
+\msg_new:nnn { grading } { choice-resized }
+  { Item~'#1':~choice~box~drawn~#2~tall~(written~#3):~choice~boxes~are~
+    \token_to_str:N \gradingchoiceheight \c_space_tl tall. }
 \msg_new:nnn { grading } { rerun }
   { Grading~box~positions~are~not~known~yet.~Rerun~to~get~them~right. }
 \msg_new:nnn { grading } { name-ignored }
@@ -302,6 +312,7 @@
       \__grading_validate:
       \dim_set:Nn \l__grading_w_dim {#2}
       \dim_set:Nn \l__grading_h_dim {#3}
+      \__grading_size:
       \__grading_register:
       \__grading_draw:
     \group_end:
@@ -331,6 +342,34 @@
           { \str_if_eq:VnF \l__grading_type_tl { rubric }
               { \msg_error:nnxx { grading } { missing-key } { answer }
                   { \l__grading_id_tl } } } }
+  }
+
+% The drawn height by type: choice boxes take \gradingchoiceheight (a square by
+% default) and note the change in the log; rubric boxes grow to at least
+% \gradingrubricminheight. Everything after this, the recorded corners
+% included, uses the drawn size.
+\dim_new:N \l__grading_written_h_dim
+\cs_new_protected:Npn \__grading_size:
+  {
+    \dim_set_eq:NN \l__grading_written_h_dim \l__grading_h_dim
+    \str_case:Vn \l__grading_type_tl
+      {
+        { choice }
+          {
+            \setlength \gradingboxwidth { \l__grading_w_dim }
+            \dim_set:Nn \l__grading_h_dim { \gradingchoiceheight }
+            \dim_compare:nNnF { \l__grading_h_dim } = { \l__grading_written_h_dim }
+              {
+                \msg_info:nnxxx { grading } { choice-resized } { \l__grading_id_tl }
+                  { \dim_use:N \l__grading_h_dim } { \dim_use:N \l__grading_written_h_dim }
+              }
+          }
+        { rubric }
+          {
+            \dim_set:Nn \l__grading_h_dim
+              { \dim_max:nn { \l__grading_h_dim } { \gradingrubricminheight } }
+          }
+      }
   }
 
 % Remember the item; its JSON line is written at the end of the document, when
@@ -379,8 +418,9 @@
 % The box: a fixed w x h hbox, centred on the surrounding text line (its middle
 % sits \gradingboxcenter above the baseline). Its lower-left and upper-right
 % corners are saved with zref-savepos where they are actually drawn. In key
-% mode the answer is centred inside, scaled down to fit — never enlarging the
-% box, so the key keeps every line and page break of the blank.
+% mode the answer is centred inside (a rubric's display sits at the top left),
+% scaled down to fit — never enlarging the box, so the key keeps every line and
+% page break of the blank.
 \box_new:N \l__grading_item_box
 \cs_new_protected:Npn \__grading_draw:
   {
@@ -435,15 +475,29 @@
           { \color { gradingkey } \bfseries \l__grading_display_tl }
       }
     \__grading_fit:
-    \vbox_to_ht:nn { \l__grading_h_dim }
+    \str_if_eq:VnTF \l__grading_type_tl { rubric }
       {
-        \tex_vss:D
-        \hbox_to_wd:nn { \l__grading_w_dim }
-          { \tex_hss:D \box_use:N \l__grading_tmp_box \tex_hss:D }
-        \tex_vss:D
+        % A model answer reads from the top left of its tall box.
+        \vbox_to_ht:nn { \l__grading_h_dim }
+          {
+            \tex_kern:D 5bp
+            \hbox_to_wd:nn { \l__grading_w_dim }
+              { \tex_kern:D 5bp \box_use:N \l__grading_tmp_box \tex_hss:D }
+            \tex_vss:D
+          }
+      }
+      {
+        \vbox_to_ht:nn { \l__grading_h_dim }
+          {
+            \tex_vss:D
+            \hbox_to_wd:nn { \l__grading_w_dim }
+              { \tex_hss:D \box_use:N \l__grading_tmp_box \tex_hss:D }
+            \tex_vss:D
+          }
       }
   }
-% Shrink \l__grading_tmp_box to fit 5bp inside the frame on every side.
+% Shrink \l__grading_tmp_box to fit inside the frame: 5bp clear at the sides,
+% and 3bp above and below (5bp for a rubric, whose text starts 5bp down).
 \cs_new_protected:Npn \__grading_fit:
   {
     \dim_compare:nNnT { \box_wd:N \l__grading_tmp_box } > { 0pt }
@@ -453,7 +507,8 @@
             min ( 1 ,
               \dim_to_fp:n { \l__grading_w_dim - 10bp }
                 / \dim_to_fp:n { \box_wd:N \l__grading_tmp_box } ,
-              \dim_to_fp:n { \l__grading_h_dim - 6bp }
+              \dim_to_fp:n { \l__grading_h_dim
+                  - \str_if_eq:VnTF \l__grading_type_tl { rubric } { 10bp } { 6bp } }
                 / \dim_to_fp:n { \box_ht:N \l__grading_tmp_box
                                  + \box_dp:N \l__grading_tmp_box + 0.01pt } )
           }

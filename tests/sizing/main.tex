@@ -1,0 +1,30 @@
+%! Box sizing by type, for make test (tests/check_sizing.py).
+% Built as a blank and as a key (\PassOptionsToPackage{key}{grading} in the
+% pretex), and once more with \SizingReset defined, which resets both rules.
+\documentclass[10pt]{article}
+\usepackage{example-article}
+\ifdefined\SizingReset
+  \setlength\gradingrubricminheight{2.5in}
+  \renewcommand\gradingchoiceheight{0.6\gradingboxwidth}
+\fi
+\gradingassignment{test-sizing}
+
+\begin{document}
+
+Choice, written short: \gradedblank[id=c1, type=choice, points=1, answer=B]{0.5in}{0.3in}
+\quad written tall: \gradedblank[id=c2, type=choice, points=1, answer=C]{0.4in}{0.7in}
+\quad written square: \gradedblank[id=c3, type=choice, points=1, answer=A]{0.45in}{0.45in}
+
+\medskip
+Short, as written: \gradedblank[id=s1, type=short, points=1, answer={x+1}]{1.2in}{0.3in}
+
+\medskip
+\gradedblank[id=r1, type=rubric, points=2,
+  display={A model answer that should start at the top left of a box that grew
+  from one inch to the minimum height.}]{\linewidth}{1in}
+
+\medskip
+\gradedblank[id=r2, type=rubric, points=2,
+  display={A rubric box written taller than the minimum keeps its height.}]{4in}{3in}
+
+\end{document}

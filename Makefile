@@ -5,9 +5,9 @@
 PYTHON   ?= python3
 TEST_OUT := build/test
 
-.PHONY: test test-python test-build clean
+.PHONY: test test-python test-build test-sizing clean
 
-test: test-python test-build
+test: test-python test-build test-sizing
 
 test-python:
 	$(PYTHON) -m unittest discover -s tests -t . -v
@@ -33,6 +33,19 @@ test-build:
 	grep -q 'GradingStudentName is defined but ignored' $(TEST_OUT)/legacy/legacy.log
 	! pdftotext $(TEST_OUT)/legacy/legacy.pdf - | grep -q Testname
 	pdftotext $(TEST_OUT)/legacy/legacy.pdf - | grep -q 'ID: K7QM2P'
+
+# The box-sizing fixture: a blank, a key, and a build with both rules reset.
+SIZING_OUT := $(TEST_OUT)/sizing
+SIZING_TEX  = cd tests/sizing && TEXINPUTS=.:$(CURDIR):$(CURDIR)/examples/shared: \
+    latexmk -xelatex -interaction=nonstopmode -halt-on-error
+test-sizing:
+	rm -rf $(SIZING_OUT)
+	$(SIZING_TEX) -outdir=$(CURDIR)/$(SIZING_OUT)/blank main.tex > /dev/null
+	$(SIZING_TEX) -usepretex='\PassOptionsToPackage{key}{grading}' \
+	    -outdir=$(CURDIR)/$(SIZING_OUT)/key main.tex > /dev/null
+	$(SIZING_TEX) -usepretex='\def\SizingReset{}' \
+	    -outdir=$(CURDIR)/$(SIZING_OUT)/reset main.tex > /dev/null
+	$(PYTHON) tests/check_sizing.py $(SIZING_OUT)
 
 clean:
 	rm -rf build

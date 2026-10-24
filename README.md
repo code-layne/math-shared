@@ -18,7 +18,7 @@ per-course style packages stay where they are:
 | `scripts/check_names.py` | Fails if any roster name is in the graded build output |
 | `scripts/blank_page.py` | Writes the blank page used as each cover's back and as padding |
 | `examples/` | A sample exit ticket with one item of each type, its key, a rubric, and an invented three-student roster |
-| `tests/` | `make test` |
+| `tests/` | `make test`, and `tests/sizing/`, a fixture for the box-size rules |
 
 ## Names stay off graded pages
 
@@ -92,13 +92,28 @@ box is drawn, so it can be set anywhere in the preamble.
 \gradedblank[id=et2, type=short, points=2, answer={3/2}]{1.5in}{0.5in}
 ```
 
-This draws a bordered box exactly `width` × `height`, centered vertically on
-the line it sits in. It works inline, inside `enumerate` items, and inside
-`tabular` cells. Write the same line in the blank and in the key. The blank
-leaves the box empty. The key prints the answer in `keyred` (or dark red if
-the course has no `keyred` color) and shrinks the answer to fit if it has to.
-The box never changes size, so the key keeps every line and page break of the
-blank.
+This draws a bordered box `width` wide, centered vertically on the line it
+sits in. It works inline, inside `enumerate` items, and inside `tabular`
+cells. Write the same line in the blank and in the key. The blank leaves the
+box empty. The key prints the answer in `keyred` (or dark red if the course
+has no `keyred` color) and shrinks the answer to fit if it has to. The box is
+the same size in the blank and the key, so the key keeps every line and page
+break of the blank.
+
+The height depends on the type:
+
+| Type | Drawn height |
+| --- | --- |
+| `choice` | Square: as tall as it is wide, whatever height is written. A box written at another height gets an info note in the log (`Item 'et1': choice box drawn … tall`), not a warning. |
+| `rubric` | The written height or `\gradingrubricminheight` (default `2in`), whichever is larger. A box written taller keeps its height. |
+| `short` | As written |
+
+Both rules can be reset after loading the package. `\gradingrubricminheight`
+is a length. The choice height is the macro `\gradingchoiceheight` (default
+`\gradingboxwidth`), evaluated for each box with the length `\gradingboxwidth`
+set to that box's width, so `\renewcommand\gradingchoiceheight{0.4in}` gives
+every choice box a fixed height. The `.grading` file and `manifest.json` record
+the drawn size.
 
 | Key | Required | Meaning |
 | --- | --- | --- |
@@ -112,8 +127,10 @@ blank.
 | `display` | no | What the key prints when it should differ from `answer`, e.g. a model response for a rubric item |
 
 By default the key prints `short` answers in math mode (`$3/2$`), except
-`check=text`. `choice` answers print as text. A `rubric` item prints only its
-`display`, as a paragraph.
+`check=text`. `choice` answers print as text. `short` and `choice` answers are
+centered in the box. A `rubric` item prints only its `display`, as a paragraph
+that starts at the top left of the box, 5bp in from the border, so a model
+answer reads the way a student would write it.
 
 Each box's lower-left and upper-right corners are saved with `zref-savepos`,
 along with the absolute page. Positions come from the previous LaTeX run, so
@@ -157,7 +174,7 @@ Every position is a length you can reset after loading the package:
 `\gradingmarksize`, `\gradingmarkinset`, `\gradingmarktop`,
 `\gradingmarkbottom`, `\gradingqrsize`, `\gradingqrinset`, `\gradingqrtop`,
 `\gradingstripleft`, `\gradingstripright`, `\gradingstriptop`,
-`\gradingstripheight` and `\gradingboxrule`. The box's vertical centre is the
+`\gradingstripheight`, `\gradingboxrule` and `\gradingrubricminheight`. The box's vertical centre is the
 macro `\gradingboxcenter` (default `0.25em`), and the strip's font is
 `\gradingstripfont`. The recorded positions follow whatever you set. The
 cover sheet takes its QR position and size from the blank's `.grading`
@@ -356,6 +373,12 @@ make test
   - renders each page and samples pixels: each manifest box's four borders
     are dark, its inside is empty in the blank and inked in the key, each
     registration mark is solid where recorded, and the QR code is present;
+  - checks that each choice box measures square and each rubric box at least
+    2in tall, in the manifest and in the drawn border;
+  - checks that each key answer fits inside its box: the ring just outside the
+    box is the same in the key as in the blank, and the answer's ink clears the
+    border. Choice answers must be centered, and rubric answers must start at
+    the top left;
   - checks that each cover's QR code fills the graded pages' QR rectangle,
     and that the cover has no registration marks and an empty strip;
   - checks that nothing reaches the text block or the paginate.tex band;
@@ -367,6 +390,12 @@ make test
   Then it runs `scripts/check_names.py` on the build. Last, it builds the
   sample with `\GradingStudentName` defined, and checks for the warning in
   the log, no name in the PDF, and `ID: K7QM2P` in the strip.
+- `test-sizing` builds `tests/sizing/main.tex` as a blank, as a key, and with
+  both rules reset, and runs `tests/check_sizing.py`. It checks the recorded
+  size of choice boxes written short, tall and square, a short box, a rubric
+  box written under 2in and one written over, the log note for each resized
+  choice box and no warning, and the same border, size and key-fit checks as
+  the sample.
 
 ## Notes
 
