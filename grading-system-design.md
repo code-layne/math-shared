@@ -84,6 +84,7 @@ Short-answer items name how the answer is checked:
 - `numeric`: a value with a tolerance, for rounded answers like a z-score or a p-value.
 - `set`: an unordered set of values, for equations with more than one solution.
 - `text`: normalized string match, for answers like "reject H0" or "increasing".
+- `interval`: any single number inside the key's interval, for a sign chart's test value. The key is written `answer={(-inf, -1)}` or `answer={[0, 2)}`; `\infty` works too.
 
 A matching section is a series of choice items, one per blank.
 

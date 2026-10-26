@@ -123,6 +123,18 @@ class ManifestTest(unittest.TestCase):
         with self.assertRaises(manifest.ManifestError):
             self.build(change=unplaced)
 
+    def test_interval_check_is_accepted(self):
+        def interval(items):
+            items[1].update(answer="(-\\infty ,\\,-1)", check="interval")
+        q = self.build(change=interval)["questions"][1]
+        self.assertEqual((q["check"], q["answer"]), ("interval", "(-\\infty ,\\,-1)"))
+
+    def test_unknown_check_is_an_error(self):
+        def bad(items):
+            items[1]["check"] = "range"
+        with self.assertRaises(manifest.ManifestError):
+            self.build(change=bad)
+
 
 if __name__ == "__main__":
     unittest.main()
