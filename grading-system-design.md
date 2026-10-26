@@ -13,6 +13,7 @@ I scan a stack of completed packets, run one command, and get back a score and a
 - Late work is graded with no deduction. The date received is recorded and never changes the score.
 - Code decides correctness wherever it can. The model reads handwriting and applies rubrics. It does not decide whether a math answer is right.
 - I review every disagreement and every rubric score until the eval set shows a question type can be trusted.
+- Chatham Hall allows student work to go to the API as long as it carries no personal information. Only answer-box crops are sent, each keyed by tracking ID. No name, roster, cover sheet, or full page image ever leaves my Mac. Students are told to write their names only on the cover sheet, and no automated check for a name inside an answer box is planned.
 
 ## Student identification
 
@@ -210,4 +211,4 @@ A question type auto-passes only after it matches my hand grades with zero disag
 
 ## Open questions
 
-- Whether Chatham Hall has a policy on sending student work to an outside API. This needs an answer before step 4 runs on real student work.
+None at present.
