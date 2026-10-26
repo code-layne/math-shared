@@ -121,7 +121,7 @@ the drawn size.
 | `type` | yes | `choice`, `short` or `rubric` |
 | `points` | yes | A number |
 | `answer` | not for `rubric` | The machine answer, written to the manifest as typed (`3/2`, `D`, `-2, 2`, `reject H0`) |
-| `check` | `short` only | `expression` (default), `numeric`, `set`, `text` |
+| `check` | `short` only | `expression` (default), `numeric`, `set`, `text`, `interval` (any number in the key's interval, as `(-inf, -1)` or `[0, 2)`) |
 | `tolerance` | no | For `check=numeric` |
 | `rubric` | no | Rubric path relative to the lesson directory. Default `rubrics/<assignment>-<id>.yaml` |
 | `display` | no | What the key prints when it should differ from `answer`, e.g. a model response for a rubric item |

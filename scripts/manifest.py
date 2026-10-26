@@ -32,7 +32,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from roster_tex import tex_escape  # noqa: E402
 
-CHECKS = {"expression", "numeric", "set", "text"}
+CHECKS = {"expression", "numeric", "set", "text", "interval"}
 TYPES = {"choice", "short", "rubric"}
 
 
