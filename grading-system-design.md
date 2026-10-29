@@ -13,28 +13,31 @@ I scan a stack of completed packets, run one command, and get back a score and a
 - Late work is graded with no deduction. The date received is recorded and never changes the score.
 - Code decides correctness wherever it can. The model reads handwriting and applies rubrics. It does not decide whether a math answer is right.
 - I review every disagreement and every rubric score until the eval set shows a question type can be trusted.
-- Chatham Hall allows student work to go to the API as long as it carries no personal information. Only answer-box crops are sent, each keyed by tracking ID. No name, roster, cover sheet, or full page image ever leaves my Mac. Students are told to write their names only on the cover sheet, and no automated check for a name inside an answer box is planned.
+- Chatham Hall allows student work to go to the API as long as it carries no personal information. Only answer-box crops are sent, each keyed by tracking ID. No name, roster, cover sheet, or full page image ever leaves my Mac. Students are told to write their names only on the lesson cover or a test's name sheet, and no automated check for a name inside an answer box is planned.
 
 ## Student identification
 
 Names stay out of the grading system. Each student gets a tracking ID, a random six-character code such as `K7QM2P`, drawn from letters and digits that can't be confused with each other. The ID is assigned once per student per school year and carries no part of her name.
 
-The only place names and IDs meet is `roster-map.csv`, which holds each tracking ID with the student's legal and preferred names, section, and class year. It lives in its own folder, apart from the grading database. Two steps read it: the packet build, to print each student's name on her cover sheet, and the final report, to put names on the scores. Everything between those two steps knows students only by tracking ID.
+The only place names and IDs meet is `roster-map.csv`, which holds each tracking ID with the student's legal and preferred names, section, and class year. It lives in its own folder, apart from the grading database. Two steps read it: the packet build, to print each student's name on her lesson cover or name sheet, and the final report, to put names on the scores. Everything between those two steps knows students only by tracking ID.
 
 Every packet is personalized. The build produces one combined PDF with a separate copy for each student, printed as one collated job. Every page carries a QR code that encodes the tracking ID along with the assignment and page. Matching a scan to a student is a lookup, and a loose page or a single late page still identifies its owner.
 
 Scanned pages go to an outside API, so a graded page carries no personal information except the tracking ID. The strip at the top of each graded page prints `ID: K7QM2P`, never a name.
 
-Packets are still handed out by name. Each student's copy starts with a cover sheet: her preferred name in large type, her legal last name under it, the course, the assignment title, the tracking ID, and the line "Remove this sheet before turning in. Do not scan it." The cover is removed before the packet is turned in, and it is never scanned. Its QR code encodes `COVER|<assignment>|<tracking ID>` in the same position and size as a graded page's, so if a cover is scanned anyway, ingest reads it with the same code and discards the page before anything is stored or sent.
+Packets are still handed out by name, in one of two ways (October 2026).
 
-In the combined PDF, each student's run is her cover, a blank page (the cover's back), and her graded copy, padded with blank pages to an even count. Every cover starts on an odd page and every graded copy on a fresh sheet, so the stack can be printed duplex.
+- **A lesson packet** prints the student's name on the Name line of the lesson's own cover (the course compiles the cover with `\def\StudentName{…}` ahead of it, with `latexmk -g` because latexmk does not track that pretex). There is no separate name sheet. Every graded component in the packet (homework, AP Practice) is her personalized copy and starts on a fresh sheet, so she tears the graded sheets out and turns them in, and the cover with her name stays in her packet. The lesson cover is never scanned and carries no QR code. Its packet table is a contents list only: no score cells.
+- **A test or quiz** starts with a separate name sheet: her preferred name in large type, her legal last name under it, the course, the assignment title, the tracking ID, and the line "Remove this sheet before turning in. Do not scan it." The sheet is removed before the test is turned in, and it is never scanned. Its QR code encodes `COVER|<assignment>|<tracking ID>` in the same position and size as a graded page's, so if a name sheet is scanned anyway, ingest reads it with the same code and discards the page before anything is stored or sent.
 
-A lost packet or a student who joins mid-unit gets a single copy, with its cover, built on demand from the same source. There is no generic copy and no handwritten-name reading.
+In the combined PDF of a test, each student's run is her name sheet, a blank page (its back), and her graded copy, padded with blank pages to an even count. In a lesson's, each student's run is her packet, paginated like the unpersonalized student packet and even. Either way every run starts on an odd page and every graded copy on a fresh sheet, so the stack can be printed duplex.
+
+A lost packet or a student who joins mid-unit gets a single copy, with its cover or name sheet, built on demand from the same source. There is no generic copy and no handwritten-name reading.
 
 ## Pipeline
 
 1. Build. LaTeX produces one personalized copy per student. The same build writes the answer-key PDF and a `manifest.json` that holds the same key in machine-readable form.
-2. Print, hand out by cover sheet, collect with the covers removed.
+2. Print, hand out by name (the lesson cover, or a test's name sheet), and collect the graded sheets: torn out of a lesson packet, or a test with its name sheet removed.
 3. Scan. Copier scan-to-PDF, one file per stack, pages in any order.
 4. Ingest. Split pages, decode QR codes, align each page to the manifest, crop answer boxes.
 5. Read. A vision call transcribes each crop.
@@ -123,7 +126,7 @@ Copier settings: 300 dpi, grayscale, one PDF per stack, duplex if the packets ar
 
 ## 3. Ingest
 
-PyMuPDF renders each page at 300 dpi. zxing-cpp decodes the QR code. A page whose code starts with `COVER` is a cover sheet that should not have been scanned: it is discarded on the spot, logged by tracking ID, and nothing from it is stored or sent. OpenCV finds the registration marks on every other page and computes the transform from the scan to manifest coordinates, which corrects skew and copier scaling. Each answer box is cropped with a small margin and saved.
+PyMuPDF renders each page at 300 dpi. zxing-cpp decodes the QR code. A page whose code starts with `COVER` is a test's name sheet that should not have been scanned: it is discarded on the spot, logged by tracking ID, and nothing from it is stored or sent. OpenCV finds the registration marks on every other page and computes the transform from the scan to manifest coordinates, which corrects skew and copier scaling. Each answer box is cropped with a small margin and saved.
 
 A page whose QR code can't be read goes to an unplaced-pages queue in review. A second copy of a page already received for the same student is flagged, not silently replaced.
 
@@ -186,7 +189,7 @@ One SQLite file holds assignments, received pages, readings, rulings, scores, an
 
 A separate roster import reads the Course Roster report (class page, Roster, Run Roster/Student Reports, Course Roster, Export Data to Excel). The export has no student ID column, and each student is one row followed by continuation rows for additional parents. The importer keeps name and class year and discards every other column, so parent contact information is never stored anywhere. It assigns a tracking ID to each new student and writes `roster-map.csv`. A re-import matches on legal name, so a student added mid-year gets a new ID and nobody else changes.
 
-Scans and crops stay on my Mac. What is sent off the machine comes from graded pages, which carry no name: answer-box crops carry neither name nor ID, and a whole page carries only the tracking ID. Cover sheets are never scanned, and one scanned by mistake is discarded at ingest.
+Scans and crops stay on my Mac. What is sent off the machine comes from graded pages, which carry no name: answer-box crops carry neither name nor ID, and a whole page carries only the tracking ID. Lesson covers and name sheets are never scanned, and a name sheet scanned by mistake is discarded at ingest.
 
 ## Shared package
 
