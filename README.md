@@ -9,7 +9,7 @@ per-course style packages stay where they are:
 
 | File | What it does |
 | --- | --- |
-| `grading.sty` | `\gradedblank` answer boxes, registration marks, page QR codes, the id strip, and the `.grading` output |
+| `grading.sty` | `\gradedblank` answer boxes, `\gradedquestion` free-response groups, registration marks, page QR codes, the id strip, and the `.grading` output |
 | `cover.tex` | The name cover sheet, one per student, on top of her personalized copy |
 | `grading.mk` | Make targets for the blank, the key, `manifest.json`, the cover sheets, and one personalized copy per student |
 | `scripts/manifest.py` | Turns a `.grading` file into `manifest.json`, checks a key against its blank, and gives the cover build its assignment details |
@@ -17,8 +17,8 @@ per-course style packages stay where they are:
 | `scripts/roster_tex.py` | Reads `roster-map.csv` for `grading.mk` (tracking ids, and TeX-safe names for the covers) |
 | `scripts/check_names.py` | Fails if any roster name is in the graded build output |
 | `scripts/blank_page.py` | Writes the blank page used as each cover's back and as padding |
-| `examples/` | A sample exit ticket with one item of each type, its key, a rubric, and an invented three-student roster |
-| `tests/` | `make test`, and `tests/sizing/`, a fixture for the box-size rules |
+| `examples/` | A sample exit ticket with one item of each type and an AP-style free-response question, its key, two rubrics, and an invented three-student roster |
+| `tests/` | `make test`; `tests/sizing/`, a fixture for the box-size rules; and `tests/groups/`, a fixture for question groups and their build errors |
 
 ## Names stay off graded pages
 
@@ -119,12 +119,13 @@ the drawn size.
 | --- | --- | --- |
 | `id` | yes | Unique within the document, e.g. `et2`. Two items with the same id are an error. |
 | `type` | yes | `choice`, `short` or `rubric` |
-| `points` | yes | A number |
+| `points` | yes, except with `question` | A number. A part of a question records 0, whatever is written (anything else written gets a warning). |
 | `answer` | not for `rubric` | The machine answer, written to the manifest as typed (`3/2`, `D`, `-2, 2`, `reject H0`) |
 | `check` | `short` only | `expression` (default), `numeric`, `set`, `text`, `interval` (any number in the key's interval, as `(-inf, -1)` or `[0, 2)`) |
 | `tolerance` | no | For `check=numeric` |
 | `rubric` | no | Rubric path relative to the lesson directory. Default `rubrics/<assignment>-<id>.yaml` |
 | `display` | no | What the key prints when it should differ from `answer`, e.g. a model response for a rubric item |
+| `question` | no | The id of the `\gradedquestion` this item is a part of |
 
 By default the key prints `short` answers in math mode (`$3/2$`), except
 `check=text`. `choice` answers print as text. `short` and `choice` answers are
@@ -137,6 +138,44 @@ along with the absolute page. Positions come from the previous LaTeX run, so
 build with `latexmk`. It reruns until the positions settle. A build with
 missing positions warns `Rerun to get them right`, and `manifest.py` refuses
 its output.
+
+### `\gradedquestion[keys]`
+
+An AP Statistics free-response question (FRQ) is scored as a whole, 0 to 4,
+not part by part. Declare the question once and give each part
+`question=<id>`:
+
+```latex
+\gradedquestion[id=et7, scheme=ap-stats]
+
+(a) Interpret the slope of the regression line in context.
+\gradedblank[id=et7a, type=rubric, question=et7]{\linewidth}{2in}
+
+(b) Predict the weight of a trout that is 30 centimeters long.
+\gradedblank[id=et7b, type=short, question=et7, answer=365, check=numeric]{1.2in}{0.4in}
+```
+
+`\gradedquestion` draws nothing. Write it identically in the blank and the
+key, before its parts. It writes one `group` line to the `.grading` file, and
+the group carries the points: 4 for `ap-stats`, which the author cannot set.
+Each part is an ordinary item. Its type (`rubric`, `short` or `choice`) still
+decides how its box is drawn and read, and its points are recorded as 0.
+
+| Key | Required | Meaning |
+| --- | --- | --- |
+| `id` | yes | The question id, e.g. `t12`. It must not also be an item id. |
+| `scheme` | no | `ap-stats` (the default, and the only scheme so far) |
+| `rubric` | no | Rubric path relative to the lesson directory. Default `rubrics/<assignment>-<id>.yaml` |
+
+The build stops with an error when:
+
+- an item names a question with no `\gradedquestion`;
+- a `\gradedquestion` has no items;
+- the same question id is declared twice with different keys;
+- a `\gradedquestion` is given `points=`;
+- one id is used for both a question and an item.
+
+Key mode is unchanged: each part prints its own `display` or `answer`.
 
 ### Page furniture
 
@@ -194,10 +233,14 @@ file wouldn't survive.) It holds:
 {"kind":"strip","box":[54,756,504,26]}
 {"kind":"mark","corner":"tl","box":[21,764,12,12]}      … tr, bl, br
 {"kind":"qr","box":[566,720,32,32]}
+{"kind":"group","assignment":"sample-u0-l1-et","id":"et7","scheme":"ap-stats","points":4,"rubric":"rubrics/sample-u0-l1-et-et7.yaml"}
 {"kind":"item","assignment":"sample-u0-l1-et","id":"et2","type":"short","points":2,"answer":"3/2","check":"expression","page":1,"box":[450,500.11,108,36]}
+{"kind":"item","assignment":"sample-u0-l1-et","id":"et7b","type":"short","points":0,"question":"et7","answer":"365","check":"numeric","tolerance":"0.5","page":2,"box":[471.6,333.15,86.4,28.8]}
 ```
 
-Each graded item gets one `item` line. Boxes are in PDF points (bp) from the
+Each `\gradedquestion` gets one `group` line, written ahead of the items with
+its default rubric path filled in. Each graded item gets one `item` line, and
+a part of a question also carries `"question"`. Boxes are in PDF points (bp) from the
 lower-left corner, measured to the outside of the border. The file never
 contains a student name.
 
@@ -215,15 +258,100 @@ scripts/manifest.py cover-tex build/blank/main.grading
 needs: `paper`, `strip`, `marks`, `qr`, and `key` (whether it was built in key
 mode).
 
+For free-response questions it adds a top-level `groups` list, gives each
+part a `question` field, and adds a top-level `points` total. The sample's
+manifest holds:
+
+```json
+"points": 15,
+"questions": [
+  ...
+  {"id": "et7a", "type": "rubric", "points": 0, "rubric": "rubrics/sample-u0-l1-et-et7a.yaml",
+   "question": "et7", "page": 2, "box": [71.93, 372.91, 486.07, 144]},
+  {"id": "et7b", "type": "short", "points": 0, "answer": "365", "check": "numeric",
+   "tolerance": 0.5, "question": "et7", "page": 2, "box": [471.6, 333.15, 86.4, 28.8]},
+  ...
+],
+"groups": [
+  {"id": "et7", "scheme": "ap-stats", "points": 4,
+   "rubric": "rubrics/sample-u0-l1-et-et7.yaml", "items": ["et7a", "et7b", "et7c"]}
+]
+```
+
+`items` lists the parts in document order. `points` is the sum of the
+ungrouped items' points plus 4 for each group: 11 + 4 = 15 here. A part of
+type `rubric` keeps its default `rubric` path in the manifest, but it is rated
+by the group's rubric, so no file is expected for it. `write` refuses a part
+whose question is undeclared, a question with no parts, a part with points
+other than 0, and an unknown scheme.
+
 `cover-tex` prints the `\def`s `cover.tex` reads: assignment, course, title,
 and the QR code's size and position. Course and title are TeX-escaped the
-same way as names. With
-`--lesson-dir`, it warns when a rubric file is missing.
+same way as names.
 
-`check` exits 1 if an item is missing from either manifest, or if any item's
-id, type, points, answer or check differs between the blank and the key. A
-box that moved, or a different page count, only produces a warning. Scans are
+With `--lesson-dir`, `write` warns when an item's or a group's rubric file is
+missing, and validates each `ap-stats` group's rubric file that exists (see
+below). An invalid rubric fails the build.
+
+`check` exits 1 if an item or a group is missing from either manifest, if any
+item's id, type, points, answer, check or question differs between the blank
+and the key, or if any group's scheme, points, rubric or items differ. A box
+that moved, or a different page count, only produces a warning. Scans are
 aligned to the blank's layout.
+
+### AP Statistics rubrics
+
+An FRQ is scored the way the College Board scores one. The question is divided
+into sections, and each section is rated E (essentially correct), P
+(partially correct) or I (incorrect). E counts 1, P counts 1/2 and I counts 0,
+each times the section's weight. A whole-number total is the score: 4
+complete, 3 substantial, 2 developing, 1 minimal, 0 inadequate. The rubric
+file for scheme `ap-stats`:
+
+```yaml
+scheme: ap-stats
+id: et7
+points: 4
+task: >-
+  One-paragraph summary of the whole question.
+sections:
+  - id: s1
+    items: [et7a]          # the box ids whose content this section rates
+    weight: 1              # optional, default 1
+    E: >-
+      What an essentially correct response includes.
+    P: >-
+      What earns partially correct.
+    I: >-
+      Optional; default "does not meet the criteria for P".
+  - ...
+notes: >-
+  Optional reader notes: common errors, what not to penalize.
+```
+
+`manifest.py write --lesson-dir` checks that `scheme`, `id` and `points`
+match the group, that there is a `task`, that section ids are unique, that
+each section lists items and has E and P descriptions, that the weights sum
+to 4, that every item of the group is in at least one section, and that every
+item in a section belongs to the group. A section may rate several boxes, and
+one box may be rated by several sections.
+`examples/rubrics/sample-u0-l1-et-et7.yaml` is a full example.
+
+Decisions behind the format:
+
+- An FRQ counts in the gradebook as its AP score, out of 4 points.
+- The rubrics are written by us, in College Board style, for the course's own
+  questions. Official College Board scoring guidelines are never committed,
+  since the course repositories are public.
+- A total that lands on a half point is decided by the teacher, who looks at
+  the whole response. Every half-point total goes to review with the model's
+  suggestion (up or down) and its reason.
+- Only AP Statistics is supported now. The `scheme` field leaves room for an
+  `ap-precalc` scheme later without changing the format.
+
+Scoring itself (one rubric call per student per question, the total computed
+in code from the ratings, the second call, and review) is in the grading
+pipeline, not here.
 
 ## scripts/roster_import.py
 
@@ -356,7 +484,11 @@ make test
 - `test-python` runs the unit tests. The roster import tests use invented
   `.xls` and HTML exports with parent continuation rows, check re-import id
   stability, and check that the git guard refuses inside a work tree. The
-  manifest tests cover the format and every way `check` can fail.
+  manifest tests cover the format and every way `check` can fail, including
+  groups: the `group` line, the `groups` list and total points, the errors
+  for an undeclared or empty question, a blank and key whose groups differ,
+  and the `ap-stats` rubric rules (weights that don't sum to 4, an item in no
+  section, an unknown item in a section, and the rest).
 - `test-python` also covers `check_names.py` (every form of a name in a
   graded log fails; names in `covers/` don't), `manifest.py cover-tex`, and
   the blank page.
@@ -396,12 +528,20 @@ make test
   box written under 2in and one written over, the log note for each resized
   choice box and no warning, and the same border, size and key-fit checks as
   the sample.
+- `test-groups` runs `tests/check_groups.py`. It builds `tests/groups/main.tex`
+  as a blank and as a key and checks the `group` lines, the parts' `question`
+  and 0 points, and the warning for a part written with points. Then it builds
+  each broken case (a part naming an undeclared question, a question with no
+  parts, a question declared twice with different keys, `points=` on a
+  question) and checks that the build stops with its error. Last, it checks
+  the sample's two manifests for the `et7` group and 15 total points.
 
 ## Notes
 
-- The design doc sketches a `gradedquestion` environment with `\answerbox`.
-  Stage 1 implements the single macro `\gradedblank`, as briefed. The
-  environment can wrap it later without changing the `.grading` format.
+- The first draft of the design doc sketched a `gradedquestion` environment
+  with `\answerbox`. Stage 1 implemented the single macro `\gradedblank`
+  instead, and the name `\gradedquestion` now belongs to the free-response
+  macro above.
 - `\gradedblank` works inside `tabularx` cells and `tcolorbox` boxes, which
   typeset their contents more than once to measure them. A repeat with the
   same keys is treated as one of those trial passes. The same id with

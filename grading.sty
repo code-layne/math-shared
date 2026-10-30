@@ -14,6 +14,16 @@
 % box (PDF points, lower-left origin); scripts/manifest.py turns that file into
 % manifest.json.
 %
+% An AP-style free-response question is scored as a whole. Its parts are
+% ordinary items that name the question:
+%
+%   \gradedquestion[id=t12, scheme=ap-stats]
+%   \gradedblank[id=t12a, type=rubric, question=t12]{\linewidth}{2in}
+%   \gradedblank[id=t12b, type=rubric, question=t12]{\linewidth}{2in}
+%
+% \gradedquestion draws nothing and writes one "group" line to \jobname.grading.
+% The group carries the points (4 for ap-stats); its items record points 0.
+%
 % Every page gets, from the shipout/background hook:
 %   - four corner registration marks, in the side margins;
 %   - a QR code encoding "assignment|page|trackingid" in the right margin, just
@@ -37,7 +47,7 @@
 % registration marks, no strip, no .grading file.
 
 \NeedsTeXFormat{LaTeX2e}[2022/06/01]
-\ProvidesExplPackage{grading}{2026/10/23}{0.2}
+\ProvidesExplPackage{grading}{2026/10/29}{0.3}
   {Graded answer boxes, registration marks, QR codes and id strip}
 
 \RequirePackage{xcolor}
@@ -131,6 +141,24 @@
   { \token_to_str:N \GradingStudentName \c_space_tl is~defined~but~ignored:~
     graded~pages~carry~only~the~tracking~id.~Names~go~on~the~cover~sheet~
     (cover.tex). }
+\msg_new:nnn { grading } { question-missing-id }
+  { \token_to_str:N \gradedquestion \c_space_tl needs~'id='. }
+\msg_new:nnn { grading } { question-points }
+  { Question~'#1':~a~question~with~scheme=#2~is~always~worth~#3~points;~
+    \token_to_str:N \gradedquestion \c_space_tl takes~no~'points='. }
+\msg_new:nnn { grading } { duplicate-question }
+  { Question~id~'#1'~is~declared~twice~in~this~document,~with~different~keys. }
+\msg_new:nnn { grading } { undeclared-question }
+  { Item~'#1'~names~question~'#2',~but~no~
+    \token_to_str:N \gradedquestion \c_space_tl declares~'#2'. }
+\msg_new:nnn { grading } { empty-question }
+  { Question~'#1'~has~no~items:~no~
+    \token_to_str:N \gradedblank \c_space_tl has~'question=#1'. }
+\msg_new:nnn { grading } { question-is-item }
+  { '#1'~is~both~a~question~id~and~an~item~id. }
+\msg_new:nnn { grading } { grouped-points }
+  { Item~'#1'~belongs~to~question~'#2':~its~'points=#3'~is~ignored~and~
+    recorded~as~0,~since~the~question~carries~the~points. }
 \msg_new:nnn { grading } { in-band }
   { \gradingmarkbottom~puts~the~bottom~registration~marks~inside~the~
     paginate.tex~band~(below~42pt). }
@@ -143,6 +171,7 @@
 \tl_new:N \l__grading_check_tl
 \tl_new:N \l__grading_tolerance_tl
 \tl_new:N \l__grading_rubric_tl
+\tl_new:N \l__grading_question_tl
 \tl_new:N \l__grading_display_tl
 \tl_new:N \l__grading_item_tl
 \bool_new:N \l__grading_display_bool
@@ -158,6 +187,8 @@
                 { \tl_set_eq:NN \l__grading_check_tl \l_keys_choice_tl } ,
     tolerance .tl_set:N = \l__grading_tolerance_tl ,
     rubric    .tl_set:N = \l__grading_rubric_tl ,
+    % The \gradedquestion this item is a part of.
+    question  .tl_set:N = \l__grading_question_tl ,
     % What the key prints in the box, when it should differ from answer=.
     display   .code:n   = { \tl_set:Nn \l__grading_display_tl {#1}
                             \bool_set_true:N \l__grading_display_bool } ,
@@ -324,8 +355,23 @@
       { \msg_error:nnnn { grading } { missing-key } { id } { ? } }
     \tl_if_empty:NT \l__grading_type_tl
       { \msg_error:nnxx { grading } { missing-key } { type } { \l__grading_id_tl } }
-    \tl_if_empty:NT \l__grading_points_tl
-      { \msg_error:nnxx { grading } { missing-key } { points } { \l__grading_id_tl } }
+    \tl_if_empty:NTF \l__grading_question_tl
+      {
+        \tl_if_empty:NT \l__grading_points_tl
+          { \msg_error:nnxx { grading } { missing-key } { points } { \l__grading_id_tl } }
+      }
+      {
+        % A part of a question: the group carries the points.
+        \tl_if_empty:NF \l__grading_points_tl
+          {
+            \fp_compare:nNnF { \l__grading_points_tl } = { 0 }
+              {
+                \msg_warning:nnxxx { grading } { grouped-points } { \l__grading_id_tl }
+                  { \l__grading_question_tl } { \l__grading_points_tl }
+              }
+          }
+        \tl_set:Nn \l__grading_points_tl { 0 }
+      }
     \regex_match:nVF { \A \d+ (\.\d+)? \Z } \l__grading_points_tl
       {
         \msg_error:nnxx { grading } { bad-points }
@@ -390,8 +436,14 @@
         \prop_gput:NVV \g__grading_ids_prop \l__grading_id_tl \l__grading_item_tl
         \seq_gput_right:Nx \g__grading_items_seq
           { { \tl_to_str:N \l__grading_id_tl } { \exp_not:V \l__grading_item_tl } }
+        \tl_if_empty:NF \l__grading_question_tl
+          {
+            \seq_gput_right:Nx \g__grading_members_seq
+              { { \tl_to_str:N \l__grading_id_tl } { \tl_to_str:N \l__grading_question_tl } }
+          }
       }
   }
+\seq_new:N \g__grading_members_seq
 \tl_new:N \l__grading_seen_tl
 \cs_new_protected:Npn \__grading_item_json:
   {
@@ -400,6 +452,11 @@
     \tl_put_right:Nx \l__grading_item_tl { "id": \l__grading_json_str , }
     \tl_put_right:Nx \l__grading_item_tl { "type":" \l__grading_type_tl ", }
     \tl_put_right:Nx \l__grading_item_tl { "points": \l__grading_points_tl , }
+    \tl_if_empty:NF \l__grading_question_tl
+      {
+        \__grading_json:V \l__grading_question_tl
+        \tl_put_right:Nx \l__grading_item_tl { "question": \l__grading_json_str , }
+      }
     \__grading_json:V \l__grading_answer_tl
     \tl_put_right:Nx \l__grading_item_tl { "answer": \l__grading_json_str , }
     \tl_put_right:Nx \l__grading_item_tl { "check":" \l__grading_check_tl ", }
@@ -518,6 +575,114 @@
       }
   }
 
+% ── \gradedquestion ───────────────────────────────────────────────────────────
+% \gradedquestion[id=<qid>, scheme=ap-stats, rubric=<path>] declares a question
+% scored as a whole; its parts are the items with question=<qid>. It draws
+% nothing. Written once, identically in the blank and the key, before its
+% parts. scheme defaults to ap-stats, the only scheme so far, which fixes the
+% points at 4. rubric defaults to rubrics/<assignment>-<qid>.yaml, relative to
+% the lesson directory like an item's. The group line is written at the end of
+% the document, after every item has been seen, so a part that names an
+% undeclared question and a question with no parts are both caught there.
+\tl_new:N \l__grading_qid_tl
+\tl_new:N \l__grading_scheme_tl
+\tl_new:N \l__grading_qrubric_tl
+\tl_new:N \l__grading_group_tl
+\tl_new:N \l__grading_qpoints_tl
+\prop_new:N \g__grading_groups_prop
+\seq_new:N \g__grading_groups_seq
+\prop_new:N \g__grading_used_groups_prop
+
+\keys_define:nn { grading / question }
+  {
+    id     .tl_set:N   = \l__grading_qid_tl ,
+    scheme .choices:nn = { ap-stats }
+               { \tl_set_eq:NN \l__grading_scheme_tl \l_keys_choice_tl } ,
+    rubric .tl_set:N   = \l__grading_qrubric_tl ,
+    points .code:n     =
+      { \msg_error:nnxxx { grading } { question-points }
+          { \l__grading_qid_tl } { \l__grading_scheme_tl }
+          { \__grading_scheme_points:V \l__grading_scheme_tl } } ,
+  }
+% Points by scheme. A new scheme (ap-precalc) adds a case here and a choice
+% above.
+\cs_new:Npn \__grading_scheme_points:n #1
+  { \str_case:nn {#1} { { ap-stats } { 4 } } }
+\cs_generate_variant:Nn \__grading_scheme_points:n { V }
+
+\NewDocumentCommand \gradedquestion { O{} }
+  {
+    \group_begin:
+      \tl_set:Nn \l__grading_scheme_tl { ap-stats }
+      \keys_set:nn { grading / question } {#1}
+      \tl_if_empty:NTF \l__grading_qid_tl
+        { \msg_error:nn { grading } { question-missing-id } }
+        {
+          \tl_set:Nx \l__grading_group_tl
+            {
+              { \tl_to_str:N \l__grading_scheme_tl }
+              { \__grading_scheme_points:V \l__grading_scheme_tl }
+              { \tl_to_str:N \l__grading_qrubric_tl }
+            }
+          % A repeat with the same keys is a trial pass (tabularx, tcolorbox).
+          \prop_get:NVNTF \g__grading_groups_prop \l__grading_qid_tl \l__grading_seen_tl
+            {
+              \tl_if_eq:NNF \l__grading_seen_tl \l__grading_group_tl
+                { \msg_error:nnx { grading } { duplicate-question } { \l__grading_qid_tl } }
+            }
+            {
+              \prop_gput:NVV \g__grading_groups_prop \l__grading_qid_tl \l__grading_group_tl
+              \seq_gput_right:Nx \g__grading_groups_seq { \tl_to_str:N \l__grading_qid_tl }
+            }
+        }
+    \group_end:
+    \ignorespaces
+  }
+
+% At the end: every part names a declared question, every question has parts,
+% and no id is both.
+\cs_new_protected:Npn \__grading_check_groups:
+  {
+    \seq_map_inline:Nn \g__grading_members_seq { \__grading_check_member:nn ##1 }
+    \seq_map_inline:Nn \g__grading_groups_seq
+      {
+        \prop_if_in:NnF \g__grading_used_groups_prop {##1}
+          { \msg_error:nnn { grading } { empty-question } {##1} }
+        \prop_if_in:NnT \g__grading_ids_prop {##1}
+          { \msg_error:nnn { grading } { question-is-item } {##1} }
+      }
+  }
+\cs_new_protected:Npn \__grading_check_member:nn #1#2
+  {
+    \prop_if_in:NnTF \g__grading_groups_prop {#2}
+      { \prop_gput:Nnn \g__grading_used_groups_prop {#2} { } }
+      { \msg_error:nnnn { grading } { undeclared-question } {#1} {#2} }
+  }
+
+% One group line: {"kind":"group","assignment":...,"id":...,"scheme":...,
+% "points":4,"rubric":...}.
+\str_new:N \l__grading_qid_json_str
+\cs_new_protected:Npn \__grading_write_group:n #1
+  {
+    \prop_get:NnN \g__grading_groups_prop {#1} \l__grading_group_tl
+    \use:x
+      { \exp_not:N \__grading_write_group:nnnn {#1} \exp_not:V \l__grading_group_tl }
+  }
+\cs_new_protected:Npn \__grading_write_group:nnnn #1#2#3#4
+  {
+    \__grading_json:n {#1}
+    \str_set_eq:NN \l__grading_qid_json_str \l__grading_json_str
+    \tl_if_empty:nTF {#4}
+      { \__grading_json:x { rubrics/ \__grading_assignment: - #1 .yaml } }
+      { \__grading_json:n {#4} }
+    \__grading_write:n
+      {
+        "kind":"group", "assignment": \l__grading_assignment_json_str ,
+        "id": \l__grading_qid_json_str , "scheme":" #2 ", "points": #3 ,
+        "rubric": \l__grading_json_str
+      }
+  }
+
 % ── Items printed twice ──────────────────────────────────────────────────────
 % Every box that is actually shipped writes \grading@shipped{id} to the aux
 % file (trial typesetting by tabularx or tcolorbox ships nothing). Reading the
@@ -614,6 +779,8 @@
         "box": \__grading_rect:nnnn { \__grading_qr_x: } { \__grading_qr_y: }
           { \gradingqrsize } { \gradingqrsize }
       }
+    \__grading_check_groups:
+    \seq_map_inline:Nn \g__grading_groups_seq { \__grading_write_group:n {##1} }
     \__grading_json:x { \__grading_assignment: }
     \seq_map_inline:Nn \g__grading_items_seq { \__grading_write_item:nn ##1 }
     \iow_close:N \g__grading_iow

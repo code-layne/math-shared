@@ -1,0 +1,33 @@
+%! Question groups, for make test (tests/check_groups.py).
+% Built once as written, once as a key, and once for each broken case, chosen
+% by defining \GroupsCase in the pretex: undeclared, empty, duplicate, points.
+% Each broken case must stop the build with its error.
+\documentclass[10pt]{article}
+\usepackage{example-article}
+\gradingassignment{test-groups}
+\providecommand\GroupsCase{ok}
+\makeatletter
+\def\GroupsIf#1#2{\edef\@tempa{#1}\edef\@tempb{\GroupsCase}%
+  \ifx\@tempa\@tempb #2\fi}
+\makeatother
+
+\begin{document}
+
+A two-part question with the default rubric path, its parts written before
+and after the declaration. \gradedblank[id=q1a, type=rubric, question=q1]{\linewidth}{1in}
+\gradedquestion[id=q1, scheme=ap-stats]
+\gradedblank[id=q1b, type=short, question=q1, points=3, answer=7]{1in}{0.3in}
+
+A question with its own rubric path and no scheme written.
+\gradedquestion[id=q2, rubric={../rubrics/test-groups-q2.yaml}]
+\gradedblank[id=q2a, type=choice, question=q2, answer=B]{0.4in}{0.4in}
+\gradedblank[id=q2b, type=rubric, question=q2, points=0]{\linewidth}{1in}
+
+An ordinary item: \gradedblank[id=e1, type=short, points=2, answer=5]{1in}{0.3in}
+
+\GroupsIf{undeclared}{\gradedblank[id=z1, type=short, question=zz, answer=1]{1in}{0.3in}}
+\GroupsIf{empty}{\gradedquestion[id=q9]}
+\GroupsIf{duplicate}{\gradedquestion[id=q1, rubric=other.yaml]}
+\GroupsIf{points}{\gradedquestion[id=q8, points=5]}
+
+\end{document}
