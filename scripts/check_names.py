@@ -6,7 +6,10 @@
 Scans every file grading.mk writes for graded pages: blank/, key/ and
 students/ (the personalized component builds: PDFs, logs, aux, .grading,
 latexmk's command transcript), and the *.out logs beside them. PDFs are read
-with pdftotext and pdfinfo; every other file as text. The cover sheets
+with pdftotext and pdfinfo; XDV and DVI files by their opcodes, keeping every
+string they carry (specials, font names, comments, XeTeX's actual text) and
+skipping glyph and position bytes, where a short name would match by chance;
+every other file as text. The cover sheets
 (covers/), the joined packets (packets/, personalized.pdf, student-*.pdf) and
 nothing else may hold names, and they are not scanned.
 
@@ -58,7 +61,72 @@ def pattern(text):
     return re.compile(r"(?<!\w)" + re.escape(text) + r"(?!\w)")
 
 
+# Bytes of fixed-size parameters after each DVI/XDV opcode; the opcodes that
+# carry strings are handled in xdv_text().
+_DVI_FIXED = {132: 8, 137: 8, 138: 0, 139: 44, 140: 0, 141: 0, 142: 0, 248: 28}
+for _base, _first in [(127, 128), (132, 133), (142, 143), (147, 148), (152, 153),
+                      (156, 157), (161, 162), (166, 167), (234, 235)]:
+    _DVI_FIXED.update({_first + i: _first + i - _base for i in range(4)})
+_DVI_FIXED.update({op: 0 for op in [*range(128), 147, 152, 161, 166, *range(171, 235)]})
+
+
+def xdv_text(data):
+    """The strings in a DVI or XDV (version 7) file, one per line.
+
+    Raises ValueError on anything it cannot parse."""
+    def take(n):
+        nonlocal i
+        if i + n > len(data):
+            raise ValueError("truncated")
+        i += n
+        return data[i - n:i]
+
+    def num(n):
+        return int.from_bytes(take(n), "big")
+
+    i, out = 0, []
+    if data[:2] not in (b"\xf7\x02", b"\xf7\x07"):
+        raise ValueError("not DVI or XDV 7")
+    while True:
+        op = num(1)
+        if op in _DVI_FIXED:
+            take(_DVI_FIXED[op])
+        elif 239 <= op <= 242:                      # xxx: special
+            out.append(take(num(op - 238)))
+        elif 243 <= op <= 246:                      # fnt_def
+            take(op - 242 + 12)
+            a, l = num(1), num(1)
+            out.append(take(a + l))
+        elif op == 247:                             # pre
+            take(13)
+            out.append(take(num(1)))
+        elif op == 249:                             # post_post
+            break
+        elif op == 252:                             # native_font_def
+            take(8)
+            flags = num(2)
+            out.append(take(num(1)))
+            take(4 + 4 * sum(bool(flags & f) for f in (0x0200, 0x1000, 0x2000, 0x4000)))
+        elif op == 253:                             # glyphs
+            take(4)
+            take(10 * num(2))
+        elif op == 254:                             # text_and_glyphs
+            out.append(take(2 * num(2)).decode("utf-16-be", errors="replace").encode())
+            take(4)
+            take(10 * num(2))
+        else:
+            raise ValueError(f"unknown opcode {op}")
+    return "\n".join(s.decode("utf-8", errors="replace") for s in out)
+
+
 def text_of(path):
+    if path.suffix in (".xdv", ".dvi"):
+        data = path.read_bytes()
+        try:
+            return xdv_text(data)
+        except ValueError:
+            pass                                    # unparseable: scan it all, as text
+        return data.decode("utf-8", errors="replace")
     if path.suffix == ".pdf":
         return "\n".join(
             subprocess.run([tool, str(path)] + extra, capture_output=True,

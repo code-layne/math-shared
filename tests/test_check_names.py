@@ -14,6 +14,27 @@ import check_names  # noqa: E402
 ROSTER = ROOT / "examples" / "roster-map.csv"
 
 
+def xdv(page):
+    """A one-page XDV 7 file whose page holds the given opcodes."""
+    pre = b"\xf7\x07" + (25400000).to_bytes(4, "big") + (473628672).to_bytes(4, "big") \
+        + (1000).to_bytes(4, "big") + b"\x00"
+    bop = b"\x8b" + bytes(40) + (-1).to_bytes(4, "big", signed=True)
+    font = b"\xfc" + (1).to_bytes(4, "big") + (655360).to_bytes(4, "big") + b"\x00\x00" \
+        + bytes([len(b"[lmroman10-regular.otf]")]) + b"[lmroman10-regular.otf]" + bytes(4)
+    post = b"\xf8" + bytes(28)
+    return pre + font + bop + page + b"\x8c" + post + b"\xf9" + bytes([0, 0, 0, 0, 7]) + b"\xdf" * 4
+
+
+def glyphs(raw):
+    """A glyphs opcode whose glyph-id bytes are exactly raw."""
+    n = len(raw) // 2
+    return b"\xfd" + bytes(4) + n.to_bytes(2, "big") + bytes(8 * n) + raw
+
+
+def special(text):
+    return b"\xef" + bytes([len(text)]) + text
+
+
 class CheckNamesTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -46,6 +67,33 @@ class CheckNamesTest(unittest.TestCase):
     def test_a_name_in_blank_or_key_fails(self):
         (self.out / "key").mkdir()
         (self.out / "key" / "main.aux").write_text("\\def\\x{Maggie}\n")
+        self.assertEqual(self.run_check(), 1)
+
+    def test_name_bytes_in_xdv_glyph_data_pass(self):
+        # A 2-letter given name between non-printing bytes, as XeTeX glyph ids
+        # and positions produce by chance, is not text on the page.
+        roster = self.out / "roster.csv"
+        roster.write_text("tracking_id,legal_name,preferred_name,class_year,section\n"
+                          'Q2ZT7K,"Testcase, Bo",Bo,2028,Algebra 2 - A\n')
+        page = glyphs(b"@2\x02Bo\xff\x00\x01Zo\xc3\xab\x00")
+        (self.out / "students" / "K7QM2P.xdv").write_bytes(xdv(page))
+        self.assertEqual(check_names.main([str(self.out), str(roster)]), 0)
+        self.assertEqual(self.run_check(), 0)
+
+    def test_name_in_xdv_special_fails(self):
+        page = glyphs(b"\x00\x01") + special(b"pdf:docinfo << /Author (Avery) >>")
+        (self.out / "students" / "K7QM2P.xdv").write_bytes(xdv(page))
+        self.assertEqual(self.run_check(), 1)
+
+    def test_name_in_xdv_actual_text_fails(self):
+        text = "Zo\u00eb".encode("utf-16-be")
+        page = b"\xfe" + (len(text) // 2).to_bytes(2, "big") + text + bytes(4) + bytes(2)
+        (self.out / "students" / "K7QM2P.xdv").write_bytes(xdv(page))
+        self.assertEqual(self.run_check(), 1)
+
+    def test_unparseable_xdv_is_scanned_whole(self):
+        data = xdv(glyphs(b"\x00\x01") + special(b"Avery"))
+        (self.out / "students" / "K7QM2P.xdv").write_bytes(data[:-12] + b"\xfb")
         self.assertEqual(self.run_check(), 1)
 
     def test_no_personalized_build_is_an_error(self):
