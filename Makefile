@@ -5,9 +5,9 @@
 PYTHON   ?= python3
 TEST_OUT := build/test
 
-.PHONY: test test-python test-build test-sizing clean
+.PHONY: test test-python test-build test-sizing test-groups clean
 
-test: test-python test-build test-sizing
+test: test-python test-build test-sizing test-groups
 
 test-python:
 	$(PYTHON) -m unittest discover -s tests -t . -v
@@ -46,6 +46,14 @@ test-sizing:
 	$(SIZING_TEX) -usepretex='\def\SizingReset{}' \
 	    -outdir=$(CURDIR)/$(SIZING_OUT)/reset main.tex > /dev/null
 	$(PYTHON) tests/check_sizing.py $(SIZING_OUT)
+
+# Question groups: tests/groups/main.tex as a blank and a key, each broken case
+# (which must stop the build with its error), and the sample's manifests from
+# test-build.
+GROUPS_OUT := $(TEST_OUT)/groups
+test-groups:
+	rm -rf $(GROUPS_OUT)
+	$(PYTHON) tests/check_groups.py $(GROUPS_OUT) $(TEST_OUT)
 
 clean:
 	rm -rf build

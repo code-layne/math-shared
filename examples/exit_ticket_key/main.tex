@@ -1,4 +1,4 @@
-%! Sample graded exit ticket — one item of each type (Answer Key)
+%! Sample graded exit ticket — one item of each type and an AP-style free-response question (Answer Key)
 \documentclass[10pt]{article}
 \usepackage{example-key}
 \gradingassignment{sample-u0-l1-et}
@@ -49,6 +49,30 @@ Write each final answer inside its box. Show your work outside the boxes.
     \gradedblank[id=et6, type=rubric, points=4,
       display={For each additional hour worked, the predicted pay increases by
       \$2.50 (2.5 dollars per hour).}]{\linewidth}{2in}
+
+  \item \textbf{Free response.} An ecologist measured the length, in centimeters, and the
+    weight, in grams, of 12 randomly selected trout from a lake. The least-squares regression
+    line is $\widehat{\text{weight}} = -310 + 22.5(\text{length})$, with $r = 0.94$.
+    \gradedquestion[id=et7, scheme=ap-stats]
+
+    (a) Interpret the slope of the regression line in context.
+
+    \gradedblank[id=et7a, type=rubric, question=et7,
+      display={For each additional centimeter of length, the predicted weight of a trout
+      increases by 22.5 grams.}]{\linewidth}{2in}
+
+    \vspace{6pt}
+    (b) Predict the weight of a trout that is 30 centimeters long. \hfill
+    \gradedblank[id=et7b, type=short, question=et7, answer=365, check=numeric,
+      tolerance=0.5, display={365 g}]{1.2in}{0.4in}
+
+    \vspace{6pt}
+    (c) A trout from the sample is 30 centimeters long and weighs 340 grams. Calculate and
+    interpret the residual for this trout.
+
+    \gradedblank[id=et7c, type=rubric, question=et7,
+      display={Residual $= 340 - 365 = -25$ grams. This trout weighs 25 grams less than
+      the regression line predicts for a trout 30 centimeters long.}]{\linewidth}{2in}
 \end{enumerate}
 
 \end{document}

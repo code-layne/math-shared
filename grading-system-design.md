@@ -13,6 +13,7 @@ I scan a stack of completed packets, run one command, and get back a score and a
 - Late work is graded with no deduction. The date received is recorded and never changes the score.
 - Code decides correctness wherever it can. The model reads handwriting and applies rubrics. It does not decide whether a math answer is right.
 - I review every disagreement and every rubric score until the eval set shows a question type can be trusted.
+- An AP Statistics free-response question counts in the gradebook as its AP score, out of 4 points. Its rubric is written by us in College Board style, and official College Board scoring guidelines are never committed, since the course repos are public. Every total that lands on a half point comes to me to round up or down (October 2026).
 - Chatham Hall allows student work to go to the API as long as it carries no personal information. Only answer-box crops are sent, each keyed by tracking ID. No name, roster, cover sheet, or full page image ever leaves my Mac. Students are told to write their names only on the lesson cover or a test's name sheet, and no automated check for a name inside an answer box is planned.
 
 ## Student identification
@@ -53,16 +54,14 @@ The grader works from the answer keys the curriculum build already generates. Wh
 
 The key comes as a machine-readable `manifest.json` written by the same build that produces the answer-key PDF, from the same LaTeX source. The key I post to Blackbaud and the key the grader uses can't drift apart, because changing an answer in the source changes both on the next build.
 
-Graded questions are marked in the LaTeX source with an environment from the shared style package:
+Graded answer boxes are marked in the LaTeX source with a macro from the shared style package:
 
 ```latex
-\begin{gradedquestion}[id=et2, type=short, points=2, answer={3/2}]
-  Solve $2x - 3 = 0$.
-  \answerbox{1.5in}{0.6in}
-\end{gradedquestion}
+Solve $2x - 3 = 0$.
+\gradedblank[id=et2, type=short, points=2, answer={3/2}]{1.5in}{0.5in}
 ```
 
-`\answerbox` draws a bordered box and records its page and coordinates with `zref-savepos`, which works under pdfLaTeX and LuaLaTeX. Each question writes a line to a `.grading` file during the build, and a post-build script in `lesson.mk` assembles those lines into the manifest:
+`\gradedblank` draws a bordered box and records its page and coordinates with `zref-savepos`. Each box writes a line to a `.grading` file during the build, and `manifest.py`, run by `grading.mk`, assembles those lines into the manifest:
 
 ```json
 {
@@ -118,6 +117,56 @@ examples:
 
 Graded examples in the rubric file are optional. Adding them is the main way to correct the model when it scores a criterion differently than I would.
 
+### AP Statistics free-response questions
+
+An AP Statistics free-response question (FRQ) is scored holistically from 0 to 4, the way the College Board scores it. The question is divided into sections, and each section is rated E (essentially correct), P (partially correct), or I (incorrect). E counts 1, P counts 1/2, and I counts 0, each times the section's weight. A whole-number total is the score: 4 complete, 3 substantial, 2 developing, 1 minimal, 0 inadequate. A total that falls on a half point is mine to decide: I look at the whole response and score up or down.
+
+The parts of an FRQ are ordinary answer boxes. A `\gradedquestion` line ties them together:
+
+```latex
+\gradedquestion[id=t12, scheme=ap-stats]
+(a) ... \gradedblank[id=t12a, type=rubric, question=t12]{\linewidth}{2in}
+(b) ... \gradedblank[id=t12b, type=short, question=t12, answer=365, check=numeric]{1.2in}{0.4in}
+```
+
+`\gradedquestion` draws nothing and is written identically in the blank and the key, before its parts. Each part keeps its own type, which decides how its box is drawn and read, and records 0 points. The question carries the points, which are fixed at 4 for `ap-stats`. The build stops if a part names an undeclared question, a question has no parts, or a question id is declared twice with different keys.
+
+The manifest gets a top-level `groups` list, and each part gets `"question"`:
+
+```json
+"groups": [
+  {"id": "t12", "scheme": "ap-stats", "points": 4,
+   "rubric": "../rubrics/apstats-u02-actual-test-t12.yaml",
+   "items": ["t12a", "t12b", "t12c", "t12d", "t12e"]}
+]
+```
+
+The assignment's total points are the ungrouped items' points plus 4 for each group. The rubric path defaults to `rubrics/<assignment>-<id>.yaml`, like an item's.
+
+The rubric for an FRQ has its own shape:
+
+```yaml
+scheme: ap-stats
+id: t12
+points: 4
+task: >-
+  One-paragraph summary of the whole question.
+sections:
+  - id: s1
+    items: [t12a, t12b]
+    weight: 1
+    E: >-
+      What an essentially correct response includes.
+    P: >-
+      What earns partially correct.
+    I: >-
+      Optional; default "does not meet the criteria for P".
+notes: >-
+  Optional reader notes: common errors, what not to penalize.
+```
+
+Section weights sum to 4, every part of the question appears in at least one section, every item in a section is a part of the question, and section ids are unique. `manifest.py` checks all of this at build time. I write these rubrics myself, in College Board style, for the course's own questions. Official College Board scoring guidelines never go into a repo. The `scheme` field leaves room for an `ap-precalc` scheme later without changing the format; for now only AP Statistics is supported.
+
 Every page carries four corner registration marks and a QR code in a fixed corner. Students show work outside the answer box. In the first scope only what is inside the box is graded.
 
 ## 2. Scanning
@@ -152,6 +201,8 @@ Short-answer items parse the reading and apply the check named in the manifest. 
 
 Rubric items get a second call that includes the rubric and the crop along with the transcription. The model returns, for each criterion, the points awarded, the words from the response that justify them, and a confidence level, plus one feedback note for the student. The answer key and rubric come first in the prompt so they are cached across the whole class.
 
+An FRQ gets one rubric call per student, with all of the question's crops and transcriptions labelled by box id, plus the rubric. The model rates each section E, P, or I with the words that justify the rating and a confidence level, and writes one feedback note for the whole question. Code computes the total from the ratings and weights; the model never computes the score. When the total lands on a half point, the model also suggests rounding up or down, with a one-sentence reason.
+
 Feedback names what is missing and points the student back to it with a question. It does not supply the answer. This is a default I can edit in the prompt.
 
 Before scoring, identical normalized readings are grouped. Each group is scored once and appears in review as one item with a count.
@@ -163,6 +214,8 @@ A second call gets the crop and manifest entry along with the first call's readi
 For choice and short-answer items, a match between the two readings with high confidence on both passes without review. Anything else goes to review.
 
 For rubric items, the second call scores each criterion independently, and every rubric item goes to review in the first phase whether or not the calls agree. Disagreements are sorted to the top.
+
+For an FRQ, the second call rates every section from the crops and rubric without the first call's reasoning. Any section rated differently is a disagreement. Every FRQ goes to review in the first phase, with disagreements and half-point totals first. A half-point total shows the model's suggested rounding, and I choose up or down. Rulings keyed by normalized answer don't apply to FRQs.
 
 ## 7. Review
 
@@ -201,7 +254,7 @@ The build runs as Claude Code cloud sessions, one per stage, briefed in `cloud-s
 
 ## Build order
 
-1. Write the roster import and `roster-map.csv`. Add `gradedquestion`, `\answerbox`, registration marks, and QR codes to the style package, and add the roster loop to `lesson.mk` along with a target for a single student's copy. Write one sample Algebra 2 assignment with items of every type.
+1. Write the roster import and `roster-map.csv`. Add `\gradedblank`, registration marks, and QR codes to the style package, and add the roster loop to `lesson.mk` along with a target for a single student's copy. Write one sample Algebra 2 assignment with items of every type.
 2. Build a synthetic class set: invented students, likely answers including common misconceptions, rendered in handwriting fonts and degraded like a copier scan, with a file of the correct scores. This is the first eval set. A hand-graded real class set replaces it once the system is in use.
 3. Build ingest and test it against the scans of the eval set.
 4. Build reading and scoring for choice and short-answer items. Compare to the hand grades.

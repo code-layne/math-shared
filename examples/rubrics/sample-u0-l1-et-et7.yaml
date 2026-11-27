@@ -1,0 +1,57 @@
+scheme: ap-stats
+id: et7
+points: 4
+task: >-
+  Interpret the slope of a least-squares regression line for trout weight
+  (grams) on length (centimeters), use the line to predict the weight of a
+  30 cm trout, and calculate and interpret the residual for a 30 cm trout that
+  weighs 340 grams.
+sections:
+  - id: s1
+    items: [et7a]
+    E: >-
+      The response interprets the slope in context and includes the following
+      three components: (1) the value of the slope, 22.5 grams per centimeter;
+      (2) language that makes the change a predicted or average increase in
+      weight, not a certain increase for every trout; and (3) both
+      variables in context, weight in grams and each additional centimeter of
+      length.
+    P: >-
+      The response includes two of the three components.
+    I: >-
+      The response includes at most one of the three components, or states the
+      slope as a deterministic change in the actual weight of a trout with no
+      reference to prediction or average.
+  - id: s2
+    items: [et7b]
+    E: >-
+      The response gives a predicted weight of 365 grams and shows the
+      substitution of 30 into the regression equation, -310 + 22.5(30).
+    P: >-
+      The response shows a correct substitution with an arithmetic error, or
+      gives 365 with no supporting work.
+  - id: s3
+    items: [et7c]
+    E: >-
+      The response calculates the residual as observed minus predicted,
+      340 - 365 = -25 grams, with the subtraction shown.
+    P: >-
+      The response calculates predicted minus observed (25), or uses an
+      incorrect predicted value from part (b) consistently and correctly.
+  - id: s4
+    items: [et7c]
+    E: >-
+      The response interprets the residual in context: the actual weight of
+      this trout is 25 grams less than the weight predicted by the regression
+      line for a trout 30 centimeters long. The interpretation must be
+      consistent with the sign of the residual calculated.
+    P: >-
+      The response interprets the residual as the trout weighing less than
+      predicted but omits the amount, or gives the amount without saying that
+      it is a comparison with the predicted weight.
+notes: >-
+  Do not penalize a response for rounding the slope. A response that uses an
+  incorrect prediction from part (b) can still earn E in s3 and s4 if the
+  residual is calculated and interpreted correctly from that prediction. The
+  phrase "predicted to increase" and "on average increases" both satisfy the
+  second component of s1.
